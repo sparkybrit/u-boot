@@ -11,6 +11,6 @@ obj-y	+= bdinfo.o
 obj-$(CONFIG_CMD_BOOTM) += bootm.o
 obj-y	+= cache.o
 obj-y	+= interrupts.o
-obj-y	+= time.o
+obj-(CONFIG_MCFTMR)	+= time.o
 obj-y	+= traps.o
 obj-y   += fec.o

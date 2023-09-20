@@ -56,6 +56,12 @@ config MCF5441x
         select DM_SERIAL
 	bool
 
+config MC680x0
+	select OF_CONTROL
+	select DM
+        select DM_SERIAL
+	bool
+
 # processor type
 config M5208
 	bool
@@ -109,6 +115,10 @@ config M5373
 config M54418
 	bool
 	select MCF5441x
+
+config MC68030
+	bool
+	select MC680x0
 
 # peripherals
 config CF_DSPI
@@ -180,6 +190,10 @@ config TARGET_STMARK2
         select CF_DSPI
         select M54418
 
+config TARGET_SPARKY1
+    bool "Support sparky1"
+    select MC68030
+
 endchoice
 
 source "board/BuS/eb_cpu5282/Kconfig"
@@ -197,6 +211,7 @@ source "board/freescale/m5329evb/Kconfig"
 source "board/freescale/m5373evb/Kconfig"
 source "board/sysam/amcore/Kconfig"
 source "board/sysam/stmark2/Kconfig"
+source "board/sparky/sparky1/Kconfig"
 
 config M68K_QEMU
 	bool "Build with workarounds for incomplete QEMU emulation"

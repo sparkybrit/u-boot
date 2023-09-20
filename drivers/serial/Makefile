@@ -24,6 +24,7 @@ obj-$(CONFIG_CORTINA_UART) += serial_cortina.o
 obj-$(CONFIG_DEBUG_SBI_CONSOLE) += serial_sbi.o
 obj-$(CONFIG_EFI_APP) += serial_efi.o
 obj-$(CONFIG_MCFUART) += serial_mcf.o
+obj-$(CONFIG_MC68681_UART) += serial_mc68681.o
 obj-$(CONFIG_SYS_NS16550) += ns16550.o
 obj-$(CONFIG_S5P_SERIAL) += serial_s5p.o
 obj-$(CONFIG_MXC_UART) += serial_mxc.o

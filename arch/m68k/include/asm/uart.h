@@ -14,38 +14,48 @@
 /* UART module registers */
 /* Register read/write struct */
 typedef struct uart {
+	/*0*/
 	u8 umr;			/* 0x00 Mode Register */
-	u8 resv0[0x3];
+/*	u8 resv0[0x3];*/
+	/*1*/
 	union {
 		u8 usr;		/* 0x04 Status Register */
 		u8 ucsr;	/* 0x04 Clock Select Register */
 	};
-	u8 resv1[0x3];
+/*	u8 resv1[0x3]; */
+	/*2*/
 	u8 ucr;			/* 0x08 Command Register */
-	u8 resv2[0x3];
+/*	u8 resv2[0x3];*/
+	
+	/*3*/
 	union {
 		u8 utb;		/* 0x0c Transmit Buffer */
 		u8 urb;		/* 0x0c Receive Buffer */
 	};
-	u8 resv3[0x3];
+/*	u8 resv3[0x3]; */
+	/*4*/
 	union {
 		u8 uipcr;	/* 0x10 Input Port Change Register */
 		u8 uacr;	/* 0x10 Auxiliary Control reg */
 	};
-	u8 resv4[0x3];
+/*	u8 resv4[0x3]; */
+	/*5*/
 	union {
 		u8 uimr;	/* 0x14 Interrupt Mask reg */
 		u8 uisr;	/* 0x14 Interrupt Status reg */
 	};
-	u8 resv5[0x3];
+/*	u8 resv5[0x3]; */
+	/*6*/
 	u8 ubg1;		/* 0x18 Counter Timer Upper Register */
-	u8 resv6[0x3];
+/*	u8 resv6[0x3]; */
+	/*7*/
 	u8 ubg2;		/* 0x1c Counter Timer Lower Register */
-	u8 resv7[0x17];
+	u8 res[5];
+/*	u8 resv7[0x17];*/
 	u8 uip;			/* 0x34 Input Port Register */
-	u8 resv8[0x3];
+/*	u8 resv8[0x3]; */
 	u8 uop1;		/* 0x38 Output Port Set Register */
-	u8 resv9[0x3];
+/*	u8 resv9[0x3]; */
 	u8 uop0;		/* 0x3c Output Port Reset Register */
 } uart_t;
 
@@ -118,6 +128,9 @@ typedef struct uart {
 #define UART_UCR_TX_ENABLED		(0x04)
 #define UART_UCR_RX_DISABLED		(0x02)
 #define UART_UCR_RX_ENABLED		(0x01)
+
+/* Bit definitions and macros for UACR */
+#define UART_UACR_CLK			(0xF0)
 
 /* Bit definitions and macros for UIPCR */
 #define UART_UIPCR_CTS			(0x01)

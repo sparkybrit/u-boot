@@ -24,6 +24,36 @@
 #endif
 
 /* ***** CACR ***** */
+
+/* MC68030*/
+
+#if defined(CONFIG_MC68030)
+
+/* Enable Instruction Cache */
+#define M68K_CACR_EI		(1 << 0)
+/* Freeze Instruction Cache */
+#define M68K_CACR_FI		(1 << 1)
+/* Clear Entry in Instruction Cache */
+#define M68K_CACR_CEI		(1 << 2)
+/* Clear Instruction Cache */
+#define M68K_CACR_CI		(1 << 3)
+/* Instruction Burst Enable */
+#define M68K_CACR_IBE		(1 << 4)
+/* Enable Data Cache */
+#define M68K_CACR_ED		(1 << 8)
+/* Freeze Data Cache */
+#define M68K_CACR_FD		(1 << 9)
+/* Clear Entry in Data Cache */
+#define M68K_CACR_CED		(1 << 10)
+/*  Clear Data Cache */
+#define M68K_CACR_CD		(1 << 11)
+/* Data Burst Enable */
+#define M68K_CACR_CDE		(1 << 12)
+/* Write Allocate */
+#define M68K_CACR_WA		(1 << 13)
+
+#endif
+
 /* V2 Core */
 #ifdef CFG_CF_V2
 

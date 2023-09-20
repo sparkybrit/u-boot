@@ -352,4 +352,9 @@
 #endif
 #endif				/* CONFIG_M547x */
 
+#ifdef CONFIG_MC680x0
+#define CFG_SYS_NUM_IRQS		(256)
+#endif	/* CONFIG_MC680x0 */
+
+
 #endif				/* __IMMAP_H */
