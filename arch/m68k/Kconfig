@@ -71,6 +71,12 @@ config M680x0
 	  This enables support for the classic Motorola 68000 family of
 	  processors.
 
+config MC680x0
+	select OF_CONTROL
+	select DM
+        select DM_SERIAL
+	bool
+
 # processor type
 config M5208
 	bool
@@ -128,6 +134,10 @@ config M54418
 config M68040
 	bool
 	select M680x0
+
+config MC68030
+	bool
+	select MC680x0
 
 # peripherals
 config CF_DSPI
@@ -203,6 +213,10 @@ config TARGET_QEMU_M68K
       This target supports the QEMU m68k virtual machine (-M virt).
       It simulates a Motorola 68040 CPU with Goldfish peripherals.
 
+config TARGET_SPARKY1
+    bool "Support sparky1"
+    select MC68030
+
 endchoice
 
 config SYS_CPU
@@ -232,6 +246,7 @@ source "board/nxp/m5373evb/Kconfig"
 source "board/sysam/amcore/Kconfig"
 source "board/sysam/stmark2/Kconfig"
 source "board/emulation/qemu-m68k/Kconfig"
+source "board/sparky/sparky1/Kconfig"
 
 config M68K_QEMU
 	bool "Build with workarounds for incomplete QEMU emulation"
