@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Copyright (C) 2023 Graeme Harker (<graeme.harker@gmail.com>)
+ */
+
+/dts-v1/;
+
+/ {
+	model = "Sparky1";
+	compatible = "spk,sparky1";
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+    uart0: uart@80000000 {
+        compatible = "motorola,uart68681";
+        reg = <0x80000000 0x10>;
+		status = "okay";
+		bootph-all;
+    };
+};
