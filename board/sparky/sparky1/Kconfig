@@ -1,0 +1,15 @@
+if TARGET_SPARKY1
+
+config SYS_CPU
+	default "mc68030"
+
+config SYS_BOARD
+	default "sparky1"
+
+config SYS_VENDOR
+	default "sparky"
+
+config SYS_CONFIG_NAME
+	default "sparky1"
+
+endif
