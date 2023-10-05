@@ -1,0 +1,76 @@
+��initcall: 000178ce
+                                                                                                                    
+                                                                                                                    
+U-Boot 2023.07.02-dirty (Sep 16 2023 - 12:59:42 +0100)                                                              
+                                                                                                                    
+initcall: 000099f6                                                                                                  
+initcall: 00009a72                                                                                                  
+initcall: 0000250a                                                                                                  
+CPU:   Motorola MC68030                                                                                             
+initcall: 0000a388                                                                                                  
+Model: Sparky1                                                                                                      
+Board: Sparky1                                                                                                      
+initcall: 00009b92                                                                                                  
+initcall: 00009b36                                                                                                  
+DRAM:  initcall: 000029d6                                                                                           
+initcall: 00009f10                                                                                                  
+initcall: 00009a16                                                                                                  
+initcall: 00009bb6                                                                                                  
+initcall: 00009bba                                                                                                  
+initcall: 00009bbe                                                                                                  
+initcall: 00009a28
+initcall: 00009a5a
+initcall: 00009bce
+initcall: 00009c3e
+initcall: 00009c02
+initcall: 00009bc2
+initcall: 00009bc6
+initcall: 00009b96
+initcall: 00009f5a
+initcall: 00009a76
+initcall: 00009c60
+4 MiB
+initcall: 00009f72
+initcall: 00009bca
+initcall: 00009af8
+initcall: 00009baa
+initcall: 00009bae
+initcall: 00009abe
+initcall: 00009b9a
+initcall: 00009b8e
+initcall: 00009a96
+initcall: 403d8c12
+initcall: 403d8c16
+initcall: 0000a22e (relocated to 403d8e2e)
+initcall: 0000a028 (relocated to 403d8c28)
+initcall: 0000a232 (relocated to 403d8e32)
+initcall: 0000a20e (relocated to 403d8e0e)
+initcall: 0000a00a (relocated to 403d8c0a)
+initcall: 0000a23e (relocated to 403d8e3e)
+initcall: 0000a236 (relocated to 403d8e36)
+initcall: 0000a1f0 (relocated to 403d8df0)
+initcall: 0000a24a (relocated to 403d8e4a)
+initcall: 0000a23a (relocated to 403d8e3a)
+initcall: 0000d0b8 (relocated to 403dbcb8)
+initcall: 000117d0 (relocated to 403e03d0)
+serial-uclass.c:serial_initialize()
+serial-uclass.c:serial_init()
+serial-uclass.c:serial_find_console_or_panic()
+serial-uclass.c:serial_find_console_or_panic() of_live_active == false
+serial_check_stdout()
+serial_mcf.c:coldfire_serial_probe(port=0)
+serial_mcf.c:mcf_serial_init_common(uart=80000000, port=0, baudrate=115200)�mcf_serial_setbrg_common(uart=80000000, baudrate=115200)
+serial_check_stdout() !uclass_get_device_by_of_offset(UCLASS_SERIAL, node, devp)
+serial-uclass.c:serial_find_console_or_panic() !serial_check_stdout(blob, &dev)
+serial-uclass.c:serial_init() gd->flags |= GD_FLG_SERIAL_READY
+serial-uclass.c:serial_setbrg()
+mcf_serial_setbrg_common(uart=80000000, baudrate=115200)
+serial-uclass.c:serial_init() return
+initcall: 0000a246 (relocated to 403d8e46)
+initcall: 0000a178 (relocated to 403d8d78)
+Core:  2 devices, 2 uclasses, devicetree: separate
+initcall: 0000a12a (relocated to 403d8d2a)
+initcall: 0000294c (relocated to 403d154c)
+initcall: 0000a242 (relocated to 403d8e42)
+initcall: 0000a256 (relocated to 403d8e56)
+Flash: 
