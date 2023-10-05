@@ -33,8 +33,6 @@ extern void uart_port_conf(int port);
 
 static int mc68681_serial_init_common(uart_t *uart, int port_idx, int baudrate)
 {
-	u32 counter;
-
 	uart_port_conf(port_idx);
 
 	writeb(UART_UCR_RESET_RX, &uart->ucr);
@@ -43,11 +41,11 @@ static int mc68681_serial_init_common(uart_t *uart, int port_idx, int baudrate)
 	writeb(UART_UCR_RESET_MR, &uart->ucr);
 	__asm__("nop");
 
-	/* Interrupt Mask Register */
+	/* write to IMR Interrupt Mask Register */
 	/* disable uart interrupts */
 	writeb(0, &uart->uimr);
 
-	/* write to UACR: */
+	/* write to ACR: */
 	/* set baudrate set to 2 */
 	/* set counter/timer source to CLK/16 */
 	/* disable gpio interrupts */
@@ -59,18 +57,9 @@ static int mc68681_serial_init_common(uart_t *uart, int port_idx, int baudrate)
 	/* write to CSR: set RX/TX baud rate */
 	writeb(UART_UCSR_RCS(0b1011) | UART_UCSR_TCS(0b1011), &uart->ucsr);
 
-	/* write to UMR: set 8N1 */
+	/* write to MR: set 8N1 */
 	writeb(UART_UMR_BC_8 | UART_UMR_PM_NONE, &uart->umr);
 	writeb(UART_UMR_SB_STOP_BITS_1, &uart->umr);
-
-	/* Set baudrate */
-	counter = (u32) ((gd->bus_clk / 32) + (baudrate / 2));
-	counter = counter / baudrate;
-
-	/* write to CTUR: counter upper byte */
-	writeb((u8)(0x4), &uart->ubg1);
-	/* write to CTLR: counter lower byte */
-	writeb((u8)(0x80), &uart->ubg2);
 
 	writeb(UART_UCR_RX_ENABLED | UART_UCR_TX_ENABLED, &uart->ucr);
 
@@ -79,20 +68,7 @@ static int mc68681_serial_init_common(uart_t *uart, int port_idx, int baudrate)
 
 static void mc68681_serial_setbrg_common(uart_t *uart, int baudrate)
 {
-	u32 counter;
-
 	debug("mc68681_serial_setbrg_common(uart=%p, baudrate=%d)\n", uart, baudrate);
-
-	return;
-
-	/* Setting up BaudRate */
-	counter = (u32) ((gd->bus_clk / 32) + (baudrate / 2));
-	counter = counter / baudrate;
-
-	/* write to CTUR: divide counter upper byte */
-	writeb(((counter & 0xff00) >> 8), &uart->ubg1);
-	/* write to CTLR: divide counter lower byte */
-	writeb((counter & 0x00ff), &uart->ubg2);
 
 	writeb(UART_UCR_RESET_RX, &uart->ucr);
 	writeb(UART_UCR_RESET_TX, &uart->ucr);

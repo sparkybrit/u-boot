@@ -25,14 +25,17 @@ struct pt_regs {
 	ulong a4;
 	ulong a5;
 	ulong a6;
-#if defined(__M68K__)
+#if defined(CONFIG_MCF520x)|| defined(CONFIG_MCF523x)|| defined(CONFIG_MCF52x2)||defined(CONFIG_MCF530x)||defined(CONFIG_MCF5301x)||defined(CONFIG_MCF532x)||defined(CONFIG_MCF537x)||defined(CONFIG_MCF5441x)
 	unsigned format:4;	/* frame format specifier */
 	unsigned vector:12;	/* vector offset */
 	unsigned short sr;
 	unsigned long pc;
-#else
+#endif
+#if defined(CONFIG_MC68030)
 	unsigned short sr;
 	unsigned long pc;
+	unsigned format:4;	/* frame format specifier */
+	unsigned vector:12;	/* vector offset */
 #endif
 };
 

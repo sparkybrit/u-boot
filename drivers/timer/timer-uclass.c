@@ -45,7 +45,7 @@ int notrace timer_get_count(struct udevice *dev, u64 *count)
 unsigned long notrace timer_get_rate(struct udevice *dev)
 {
 	struct timer_dev_priv *uc_priv = dev_get_uclass_priv(dev);
-
+	debug("%s() clock_rate=%lu\n", __func__, uc_priv->clock_rate);
 	return uc_priv->clock_rate;
 }
 

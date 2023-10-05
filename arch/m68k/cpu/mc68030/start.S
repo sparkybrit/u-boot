@@ -34,44 +34,49 @@
  * These vectors are to catch any un-intended traps.
  */
 _vectors:
-.long	0x00000000		/* Flash offset is 0 until we setup CS0 */
-.long	_START
+/* 0x000 */
+.long	0x00000000,	  _START,       _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler
+/* 0x020 */
+.long	_exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler
+/* 0x040 */
+.long	_exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler
+/* 0x060 */
+.long	_exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler
+/* 0x080 */
+.long	_exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler
+/* 0x0a0 */
+.long	_exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler
+/* 0x0c0 */
+.long	_exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler
+/* 0x0e0 */
+.long	_exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler, _exc_handler
+/* 0x100 */
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
 
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
 
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
-.long	_FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT, _FAULT
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
+.long	_int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler, _int_handler,_int_handler
 
 #endif
 

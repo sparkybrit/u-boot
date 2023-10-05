@@ -3,8 +3,6 @@
  * (C) Copyright 2023  Graeme Harker <graeme.harker@gmail.com>
  */
 
-#define	DEBUG
-
 #include <common.h>
 #include <dm.h>
 #include <asm/global_data.h>
@@ -14,16 +12,30 @@
 #include <linux/compiler.h>
 #include <asm/immap.h>
 #include <asm/uart.h>
+#include <irq_func.h>
+
+#define	IRQ_TIMER_VECTOR 0
+#define	IRQ_TIMER_MASK 0b1000
 
 DECLARE_GLOBAL_DATA_PTR;
 
+static volatile u64 counter;
+
+static void timer_interrupt_handler(void *arg)
+{
+	uart_t *base = (uart_t *)arg;
+
+	/* reset the timer interrupt */
+	readb(&base->uopc);
+
+	/* increment the timer counter */
+	counter++;
+}
+
 static u64 mc68681_timer_get_count(struct udevice *dev)
 {
-	struct mc68681_serial_plat *plat = dev_get_plat(dev);
-	uart_t *base = (uart_t *)(plat->base);
-	unsigned int count = 0xffff - ((readb(&base->uctu) << 8) + readb(&base->uctl));
-	debug("%s: %u\n", __func__, count);
-	return count;
+	debug("%s: %llu\n", __func__, counter);
+	return counter;
 }
 
 static int mc68681_timer_probe(struct udevice *dev)
@@ -32,16 +44,26 @@ static int mc68681_timer_probe(struct udevice *dev)
 	uart_t *base = (uart_t *)(plat->base);
 	u8 uacr = readb(&base->uacr);
 
-	uacr &= 0b10001111;
-	uacr |= 0b00110000; 
+	/* generate an interrupt every 10ms (100Hz) */
+	writeb(0x04, &base->uctu);
+	writeb(0x80, &base->uctl);
 
-	debug("%s: base=0x%p, uacr=0x%x\n", __func__, base, uacr);
-	
-	/* write to ACR: set Counter/Timer in counter mode to count external clock divided by 16 */
+	/* mask out the timer/counter mode control bits */
+	uacr &= 0b10001111;
+	/* set mode to timer with uart clk divided by 16 */
+	uacr |= 0b01110000; 
+	/* write to ACR: set Counter/Timer in time mode with external uart clk divided by 16 */
 	writeb(uacr, &base->uacr);
 
-	/* read from OPS: start the counter*/
-	readb(&base->uops);
+	debug("%s: base=0x%p, uacr=0x%x\n", __func__, base, uacr);
+
+	/* set the interrupt vector */
+	writeb(IRQ_TIMER_VECTOR + 0x40, &base->ivr);
+
+	irq_install_handler(IRQ_TIMER_VECTOR, (interrupt_handler_t *)timer_interrupt_handler, base);
+
+	/* enable counter/timer interrupts */
+	writeb(IRQ_TIMER_MASK, &base->uimr);	
 
 	return (0);
 }
@@ -49,6 +71,7 @@ static int mc68681_timer_probe(struct udevice *dev)
 static int mc68681_of_to_plat(struct udevice *dev)
 {
 	struct mc68681_serial_plat *plat = dev_get_plat(dev);
+	struct timer_dev_priv *priv = dev_get_priv(dev);
 	fdt_addr_t addr_base;
 
 	addr_base = dev_read_addr(dev);
@@ -57,6 +80,7 @@ static int mc68681_of_to_plat(struct udevice *dev)
 
 	plat->base = (uint32_t)addr_base;
 	plat->baudrate = gd->baudrate;
+	priv->clock_rate = 9600;
 
 	return 0;
 }

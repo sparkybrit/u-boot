@@ -159,6 +159,13 @@ config GXP_TIMER
 	  Enables support for the GXP Timer driver. This timer is
 	  present on HPE GXP SoCs.
 
+config MC68681_TIMER
+	bool "MC68681 timer support"
+	depends on TIMER
+	help
+	  Select this to enable support for the timer found on
+	  the Motorola 68681 DUART.
+
 config MPC83XX_TIMER
 	bool "MPC83xx timer support"
 	depends on TIMER

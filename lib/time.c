@@ -133,6 +133,8 @@ static uint64_t notrace tick_to_time(uint64_t tick)
 
 	tick *= CONFIG_SYS_HZ;
 	do_div(tick, div);
+
+	debug("%s() div=%lu, ms=%lu\n", __func__, div, (long unsigned int) tick);
 	return tick;
 }
 
