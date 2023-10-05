@@ -13,50 +13,42 @@
 
 /* UART module registers */
 /* Register read/write struct */
-typedef struct uart {
-	/*0*/
-	u8 umr;			/* 0x00 Mode Register */
-/*	u8 resv0[0x3];*/
-	/*1*/
+typedef struct uart 
+{
+	u8 umr;			/* 0x0 Mode Register A */
 	union {
-		u8 usr;		/* 0x04 Status Register */
-		u8 ucsr;	/* 0x04 Clock Select Register */
+		u8 usr;		/* 0x1 Status Register A */
+		u8 ucsr;	/* 0x1 Clock Select Register A */
 	};
-/*	u8 resv1[0x3]; */
-	/*2*/
-	u8 ucr;			/* 0x08 Command Register */
-/*	u8 resv2[0x3];*/
-	
-	/*3*/
+	u8 ucr;			/* 02 Command Register A */	
 	union {
-		u8 utb;		/* 0x0c Transmit Buffer */
-		u8 urb;		/* 0x0c Receive Buffer */
+		u8 utb;		/* 0x3 Transmit Buffer A */
+		u8 urb;		/* 0x3 Receive Buffer A */
 	};
-/*	u8 resv3[0x3]; */
-	/*4*/
 	union {
-		u8 uipcr;	/* 0x10 Input Port Change Register */
-		u8 uacr;	/* 0x10 Auxiliary Control reg */
+		u8 uipcr;	/* 0x4 Input Port Change Register */
+		u8 uacr;	/* 0x4 Auxiliary Control Register */
 	};
-/*	u8 resv4[0x3]; */
-	/*5*/
 	union {
-		u8 uimr;	/* 0x14 Interrupt Mask reg */
-		u8 uisr;	/* 0x14 Interrupt Status reg */
+		u8 uimr;	/* 0x5 Interrupt Mask Register */
+		u8 uisr;	/* 0x5 Interrupt Status Register */
 	};
-/*	u8 resv5[0x3]; */
-	/*6*/
-	u8 ubg1;		/* 0x18 Counter Timer Upper Register */
-/*	u8 resv6[0x3]; */
-	/*7*/
-	u8 ubg2;		/* 0x1c Counter Timer Lower Register */
-	u8 res[5];
-/*	u8 resv7[0x17];*/
-	u8 uip;			/* 0x34 Input Port Register */
-/*	u8 resv8[0x3]; */
-	u8 uop1;		/* 0x38 Output Port Set Register */
-/*	u8 resv9[0x3]; */
-	u8 uop0;		/* 0x3c Output Port Reset Register */
+	u8 uctu;		/* 0x6 Counter Timer Upper Register */
+	u8 uctl;		/* 0x7 Counter Timer Lower Register */
+	u8 umrb;		/* 0x8 Mode Register B */
+	union {
+		u8 usrb;	/* 0x9 Status Register B */
+		u8 ucsrb;	/* 0x9 Clock Select Register B */
+	};
+	u8 ucrb;		/* 0xa Command Register B */
+	union {
+		u8 utbb;	/* 0xb Transmit Buffer B */
+		u8 urbb;	/* 0xb Receive Buffer B */
+	};
+	u8 ivr;         /* 0xc Interrupt Vector Register */
+	u8 uip;			/* 0xd Input Port Register */
+	u8 uops;		/* 0xe Output Port Set Register */
+	u8 uopc;		/* 0xf Output Port Clear Register */
 } uart_t;
 
 /*********************************************************************

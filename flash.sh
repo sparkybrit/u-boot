@@ -1,0 +1,1 @@
+sudo minipro -p SST39SF040 -w u-boot-dtb.bin -s -y
