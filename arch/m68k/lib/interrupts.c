@@ -52,6 +52,8 @@ void irq_install_handler(int vec, interrupt_handler_t * handler, void *arg)
 		return;
 	}
 
+	debug("%s: vec=%d, arg=0x%p\n", __func__, vec, arg);
+
 	irq_vecs[vec].handler = handler;
 	irq_vecs[vec].arg = arg;
 }
@@ -70,6 +72,8 @@ void enable_interrupts(void)
 {
 	unsigned short sr;
 
+	debug("%s\n", __func__);
+
 	sr = get_sr ();
 	set_sr (sr & ~0x0700);
 }
@@ -84,16 +88,17 @@ int disable_interrupts(void)
 	return ((sr & 0x0700) == 0);	/* return true, if interrupts were enabled before */
 }
 
-void int_handler (struct pt_regs *fp)
+void int_handler(struct pt_regs *fp)
 {
 	int vec;
 
 	vec = (fp->vector >> 2) & 0xff;
-	if (vec > 0x40)
+	if (vec >= 0x40)
 		vec -= 0x40;
 
 	if (irq_vecs[vec].handler != NULL) {
-		irq_vecs[vec].handler (irq_vecs[vec].arg);
+		irq_vecs[vec].handler(irq_vecs[vec].arg);
+		debug("%s, vec=%d\n", __func__, vec);
 	} else {
 		printf ("\nBogus External Interrupt Vector %d\n", vec);
 	}

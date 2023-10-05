@@ -13,6 +13,7 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
+		tick-timer = "timer0";
 	};
 
 	aliases {
@@ -22,6 +23,14 @@
     uart0: uart@80000000 {
         compatible = "motorola,uart68681";
         reg = <0x80000000 0x10>;
+		status = "okay";
+		bootph-all;
+    };
+
+    timer0: timer@80000000 {
+        compatible = "motorola,mc68681_timer";
+        reg = <0x80000000 0x10>;
+		clock-frequency = <100>;
 		status = "okay";
 		bootph-all;
     };
