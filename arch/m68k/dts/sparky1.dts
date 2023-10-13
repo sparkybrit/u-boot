@@ -34,4 +34,24 @@
 		status = "okay";
 		bootph-all;
     };
+
+    gpio0: gpio0@80000000 {
+        compatible = "motorola,mc68681_gpio";
+        reg = <0x80000000 0x10>;
+    	gpio-controller;
+		#gpio-cells = <2>;
+		gpio-bank-name="o";
+		ngpios = <8>;
+		status = "okay";
+	};
+
+    gpio1: gpio1@80000000 {
+        compatible = "motorola,mc68681_gpio";
+        reg = <0x80000000 0x10>;
+    	gpio-controller;
+		#gpio-cells = <2>;
+		gpio-bank-name="i";
+		ngpios = <6>;
+		status = "okay";
+	};
 };

@@ -307,6 +307,12 @@ config MAX77663_GPIO
 	  and 3 GPIO-like pins dedicated for power/reset buttons
 	  and LID sensor.
 
+config MC68681_GPIO
+	bool "MC68681 GPIO driver"
+	depends on DM_GPIO
+	help
+	  Support for the Motorola 68681's GPIO ports.
+
 config MCP230XX_GPIO
 	bool "MCP230XX GPIO driver"
 	depends on DM
