@@ -21,7 +21,7 @@
 #include <common.h>
 #include <dm.h>
 #include <asm/global_data.h>
-#include <dm/platform_data/serial_mc68681.h>
+#include <dm/platform_data/mc68681.h>
 #include <serial.h>
 #include <linux/compiler.h>
 #include <asm/immap.h>
@@ -68,7 +68,7 @@ static int mc68681_serial_init_common(uart_t *uart, int port_idx, int baudrate)
 
 static void mc68681_serial_setbrg_common(uart_t *uart, int baudrate)
 {
-	debug("mc68681_serial_setbrg_common(uart=%p, baudrate=%d)\n", uart, baudrate);
+	debug("%s: uart=%p, baudrate=%d)\n", __func__, uart, baudrate);
 
 	writeb(UART_UCR_RESET_RX, &uart->ucr);
 	writeb(UART_UCR_RESET_TX, &uart->ucr);
@@ -78,11 +78,11 @@ static void mc68681_serial_setbrg_common(uart_t *uart, int baudrate)
 
 static int mc68681_serial_probe(struct udevice *dev)
 {
-	struct mc68681_serial_plat *plat = dev_get_plat(dev);
+	struct mc68681_plat *plat = dev_get_plat(dev);
 
 	plat->port = dev_seq(dev);
 
-	debug("serial_68681.c:coldfire_serial_probe(port=%d)\n", plat->port);
+	debug("%s: port=%d)\n", __func__, plat->port);
 
 	return mc68681_serial_init_common((uart_t *)plat->base,
 						plat->port, plat->baudrate);
@@ -90,7 +90,7 @@ static int mc68681_serial_probe(struct udevice *dev)
 
 static int mc68681_serial_putc(struct udevice *dev, const char ch)
 {
-	struct mc68681_serial_plat *plat = dev_get_plat(dev);
+	struct mc68681_plat *plat = dev_get_plat(dev);
 	uart_t *uart = (uart_t *)plat->base;
 
 	/* Wait for last character to go. */
@@ -104,7 +104,7 @@ static int mc68681_serial_putc(struct udevice *dev, const char ch)
 
 static int mc68681_serial_getc(struct udevice *dev)
 {
-	struct mc68681_serial_plat *plat = dev_get_plat(dev);
+	struct mc68681_plat *plat = dev_get_plat(dev);
 	uart_t *uart = (uart_t *)(plat->base);
 
 	/* Wait for a character to arrive. */
@@ -116,7 +116,7 @@ static int mc68681_serial_getc(struct udevice *dev)
 
 int mc68681_serial_setbrg(struct udevice *dev, int baudrate)
 {
-	struct mc68681_serial_plat *plat = dev_get_plat(dev);
+	struct mc68681_plat *plat = dev_get_plat(dev);
 	uart_t *uart = (uart_t *)(plat->base);
 
 	mc68681_serial_setbrg_common(uart, baudrate);
@@ -126,7 +126,7 @@ int mc68681_serial_setbrg(struct udevice *dev, int baudrate)
 
 static int mc68681_serial_pending(struct udevice *dev, bool input)
 {
-	struct mc68681_serial_plat *plat = dev_get_plat(dev);
+	struct mc68681_plat *plat = dev_get_plat(dev);
 	uart_t *uart = (uart_t *)(plat->base);
 
 	if (input)
@@ -139,7 +139,7 @@ static int mc68681_serial_pending(struct udevice *dev, bool input)
 
 static int mc68681_of_to_plat(struct udevice *dev)
 {
-	struct mc68681_serial_plat *plat = dev_get_plat(dev);
+	struct mc68681_plat *plat = dev_get_plat(dev);
 	fdt_addr_t addr_base;
 
 	addr_base = dev_read_addr(dev);
@@ -169,7 +169,7 @@ U_BOOT_DRIVER(serial_mc68681) = {
 	.id = UCLASS_SERIAL,
 	.of_match = mc68681_serial_ids,
 	.of_to_plat = mc68681_of_to_plat,
-	.plat_auto	= sizeof(struct mc68681_serial_plat),
+	.plat_auto	= sizeof(struct mc68681_plat),
 	.probe = mc68681_serial_probe,
 	.ops = &mc68681_serial_ops,
 	.flags = DM_FLAG_PRE_RELOC,
