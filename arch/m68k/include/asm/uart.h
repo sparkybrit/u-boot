@@ -46,7 +46,10 @@ typedef struct uart
 		u8 urbb;	/* 0xb Receive Buffer B */
 	};
 	u8 ivr;         /* 0xc Interrupt Vector Register */
-	u8 uip;			/* 0xd Input Port Register */
+	union {
+		u8 uip;		/* 0xd Input Port Register */
+		u8 opcr;	/* Output Port Configutration Register */
+	};
 	u8 uops;		/* 0xe Output Port Set Register */
 	u8 uopc;		/* 0xf Output Port Clear Register */
 } uart_t;

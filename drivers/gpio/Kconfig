@@ -238,6 +238,12 @@ config MAX7320_GPIO
 	 original maxim device has 8 push/pull outputs,
 	 some clones offers 16bit.
 
+config MC68681_GPIO
+	bool "MC68681 GPIO driver"
+	depends on DM_GPIO
+	help
+	  Support for the Motorola 68681's GPIO ports.
+
 config MCP230XX_GPIO
 	bool "MCP230XX GPIO driver"
 	depends on DM

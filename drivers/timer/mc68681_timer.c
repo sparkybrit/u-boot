@@ -6,7 +6,7 @@
 #include <common.h>
 #include <dm.h>
 #include <asm/global_data.h>
-#include <dm/platform_data/serial_mc68681.h>
+#include <dm/platform_data/mc68681.h>
 #include <serial.h>
 #include <timer.h>
 #include <linux/compiler.h>
@@ -40,7 +40,7 @@ static u64 mc68681_timer_get_count(struct udevice *dev)
 
 static int mc68681_timer_probe(struct udevice *dev)
 {
-	struct mc68681_serial_plat *plat = dev_get_plat(dev);
+	struct mc68681_plat *plat = dev_get_plat(dev);
 	uart_t *base = (uart_t *)(plat->base);
 	u8 uacr = readb(&base->uacr);
 
@@ -70,7 +70,7 @@ static int mc68681_timer_probe(struct udevice *dev)
 
 static int mc68681_of_to_plat(struct udevice *dev)
 {
-	struct mc68681_serial_plat *plat = dev_get_plat(dev);
+	struct mc68681_plat *plat = dev_get_plat(dev);
 	struct timer_dev_priv *priv = dev_get_priv(dev);
 	fdt_addr_t addr_base;
 
@@ -99,7 +99,7 @@ U_BOOT_DRIVER(mc68681_timer) = {
 	.id = UCLASS_TIMER,
 	.of_match = mc68681_timer_ids,
 	.of_to_plat = mc68681_of_to_plat,
-	.plat_auto = sizeof(struct mc68681_serial_plat),
+	.plat_auto = sizeof(struct mc68681_plat),
 	.probe = mc68681_timer_probe,
 	.ops = &mc68681_timer_ops,
 };
