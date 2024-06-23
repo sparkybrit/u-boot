@@ -67,6 +67,7 @@ obj-$(CONFIG_ROCKCHIP_SFC) += rockchip_sfc.o
 obj-$(CONFIG_ROCKCHIP_SPI) += rk_spi.o
 obj-$(CONFIG_SANDBOX_SPI) += sandbox_spi.o
 obj-$(CONFIG_SPI_SIFIVE) += spi-sifive.o
+obj-$(CONFIG_SPARKY_SPI) += sparky1_spi.o
 obj-$(CONFIG_SPI_SN_F_OSPI) += spi-sn-f-ospi.o
 obj-$(CONFIG_SPI_SUNXI) += spi-sunxi.o
 obj-$(CONFIG_SH_QSPI) += sh_qspi.o

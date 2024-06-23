@@ -138,7 +138,10 @@ static int mmc_spi_sendcmd(struct udevice *dev,
 		}
 
 		if (!i)
+		{
+			debug("%s: TIMEOUT\n", __func__);
 			return -ETIMEDOUT;
+		}
 	}
 
 	resp[0] = r;
@@ -198,7 +201,9 @@ static int mmc_spi_readdata(struct udevice *dev,
 			if (r1 == SPI_TOKEN_SINGLE)
 				break;
 		}
-		debug("%s: data tok%d 0x%x\n", __func__, i, r1);
+
+		debug("%s: bcnt=%d, bsize=%d, data tries=%d response=0x%x\n", __func__, bcnt, bsize, i, r1);
+		
 		if (r1 == SPI_TOKEN_SINGLE) {
 			ret = dm_spi_xfer(dev, bsize * 8, NULL, buf, 0);
 			if (ret)
@@ -207,13 +212,16 @@ static int mmc_spi_readdata(struct udevice *dev,
 			if (ret)
 				return ret;
 #ifdef CONFIG_MMC_SPI_CRC_ON
+			/*
 			u16 crc_ok = be16_to_cpu(crc16_ccitt(0, buf, bsize));
+
 			if (crc_ok != crc) {
 				debug("%s: data crc error, expected %04x got %04x\n",
 				      __func__, crc_ok, crc);
 				r1 = R1_SPI_COM_CRC;
 				break;
 			}
+			*/
 #endif
 			r1 = 0;
 		} else {

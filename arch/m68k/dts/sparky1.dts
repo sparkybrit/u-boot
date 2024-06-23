@@ -54,4 +54,21 @@
 		ngpios = <6>;
 		status = "okay";
 	};
+
+	spi0: spi@c0000000 {
+		compatible = "sparky,spi";
+        reg = <0xc0000000 0x2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		spi-max-frequency = <400000>;
+		num-cs = <1>;
+		spi-mode = <0>;
+		status = "okay";
+		mmc@0 {
+			compatible = "mmc-spi-slot";
+			reg = <0>;
+			spi-max-frequency = <20000000>;
+			status = "okay";
+		};
+	};
 };

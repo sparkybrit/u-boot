@@ -202,6 +202,8 @@ int mmc_send_cmd(struct mmc *mmc, struct mmc_cmd *cmd, struct mmc_data *data)
 {
 	int ret;
 
+	debug("%s: cmdidx=%d, response_type=%d\n", __func__, cmd.cmdidx, cmd.resp_type);
+
 	mmmc_trace_before_send(mmc, cmd);
 	ret = mmc->cfg->ops->send_cmd(mmc, cmd, data);
 	mmmc_trace_after_send(mmc, cmd, ret);
@@ -513,6 +515,8 @@ static int mmc_go_idle(struct mmc *mmc)
 	struct mmc_cmd cmd;
 	int err;
 
+	debug("%s:\n", __func__);
+
 	udelay(1000);
 
 	cmd.cmdidx = MMC_CMD_GO_IDLE_STATE;
@@ -726,6 +730,8 @@ static int mmc_complete_op_cond(struct mmc *mmc)
 	int timeout = 1000;
 	ulong start;
 	int err;
+
+	debug("%s:\n", __func__);
 
 	mmc->op_cond_pending = 0;
 	if (!(mmc->ocr & OCR_BUSY)) {
@@ -1637,7 +1643,7 @@ int mmc_set_clock(struct mmc *mmc, uint clock, bool disable)
 	mmc->clock = clock;
 	mmc->clk_disable = disable;
 
-	debug("clock is %s (%dHz)\n", disable ? "disabled" : "enabled", clock);
+	debug("%s: clock is %s (%dHz)\n", __func__, disable ? "disabled" : "enabled", clock);
 
 	return mmc_set_ios(mmc);
 }
@@ -2454,14 +2460,20 @@ static int mmc_startup(struct mmc *mmc)
 	struct mmc_cmd cmd;
 	struct blk_desc *bdesc;
 
+	debug("%s:\n", __func__);
+
 #ifdef CONFIG_MMC_SPI_CRC_ON
 	if (mmc_host_is_spi(mmc)) { /* enable CRC check for spi */
 		cmd.cmdidx = MMC_CMD_SPI_CRC_ON_OFF;
 		cmd.resp_type = MMC_RSP_R1;
 		cmd.cmdarg = 1;
 		err = mmc_send_cmd(mmc, &cmd, NULL);
+
 		if (err)
+		{
+			debug("%s: MMC_CMD_SPI_CRC_ON_OFF returns err=%d\n", __func__, err);
 			return err;
+		}	
 	}
 #endif
 
@@ -2472,8 +2484,12 @@ static int mmc_startup(struct mmc *mmc)
 	cmd.cmdarg = 0;
 
 	err = mmc_send_cmd_quirks(mmc, &cmd, NULL, MMC_QUIRK_RETRY_SEND_CID, 4);
+
 	if (err)
+	{
+		debug("%s: MMC_CMD_SEND_CID returns err=%d\n", __func__, err);
 		return err;
+	}
 
 	memcpy(mmc->cid, cmd.response, 16);
 
@@ -2490,7 +2506,10 @@ static int mmc_startup(struct mmc *mmc)
 		err = mmc_send_cmd(mmc, &cmd, NULL);
 
 		if (err)
+		{
+			debug("%s: SD_CMD_SEND_RELATIVE_ADDR returns err=%d\n", __func__, err);
 			return err;
+		}
 
 		if (IS_SD(mmc))
 			mmc->rca = (cmd.response[0] >> 16) & 0xffff;
@@ -2504,7 +2523,10 @@ static int mmc_startup(struct mmc *mmc)
 	err = mmc_send_cmd(mmc, &cmd, NULL);
 
 	if (err)
+	{
+		debug("%s: MMC_CMD_SEND_CSD returns err=%d\n", __func__, err);
 		return err;
+	}
 
 	mmc->csd[0] = cmd.response[0];
 	mmc->csd[1] = cmd.response[1];
@@ -2594,7 +2616,10 @@ static int mmc_startup(struct mmc *mmc)
 		err = mmc_send_cmd(mmc, &cmd, NULL);
 
 		if (err)
+		{
+			debug("%s: MMC_CMD_SELECT_CARD returns err=%d\n", __func__, err);
 			return err;
+		}
 	}
 
 	/*
@@ -2606,12 +2631,20 @@ static int mmc_startup(struct mmc *mmc)
 	mmc->part_config = MMCPART_NOAVAILABLE;
 
 	err = mmc_startup_v4(mmc);
+
 	if (err)
+	{
+		debug("%s: mmc_startup_v4() returns err=%d\n", __func__, err);
 		return err;
+	}
 
 	err = mmc_set_capacity(mmc, mmc_get_blk_desc(mmc)->hwpart);
+
 	if (err)
+	{
+		debug("%s: mmc_set_capacity() returns err=%d\n", __func__, err);
 		return err;
+	}
 
 #if CONFIG_IS_ENABLED(MMC_TINY)
 	mmc_set_clock(mmc, mmc->legacy_speed, false);
@@ -2620,18 +2653,31 @@ static int mmc_startup(struct mmc *mmc)
 #else
 	if (IS_SD(mmc)) {
 		err = sd_get_capabilities(mmc);
+		
 		if (err)
+		{
+			debug("%s: sd_get_capabilities() 1 returns err=%d\n", __func__, err);
 			return err;
+		}
+		
 		err = sd_select_mode_and_width(mmc, mmc->card_caps);
-	} else {
+	} 
+	else 
+	{
 		err = mmc_get_capabilities(mmc);
 		if (err)
+		{
+			debug("%s: sd_get_capabilities() 2 returns err=%d\n", __func__, err);
 			return err;
+		}
 		err = mmc_select_mode_and_width(mmc, mmc->card_caps);
 	}
 #endif
 	if (err)
+	{
+		debug("%s: mmc_set_clock(), mmc_select_mode() returns err=%d\n", __func__, err);
 		return err;
+	}
 
 	mmc->best_mode = mmc->selected_mode;
 
@@ -2672,7 +2718,7 @@ static int mmc_startup(struct mmc *mmc)
 #if !defined(CONFIG_DM_MMC) && (!defined(CONFIG_SPL_BUILD) || defined(CONFIG_SPL_LIBDISK_SUPPORT))
 	part_init(bdesc);
 #endif
-
+	debug("%s: returns zero (no error)\n", __func__);
 	return 0;
 }
 
@@ -2680,7 +2726,7 @@ static int mmc_send_if_cond(struct mmc *mmc)
 {
 	struct mmc_cmd cmd;
 	int err;
-
+	debug("%s:\n", __func__);
 	cmd.cmdidx = SD_CMD_SEND_IF_COND;
 	/* We set the bit if the host supports voltages between 2.7 and 3.6 V */
 	cmd.cmdarg = ((mmc->cfg->voltages & 0xff8000) != 0) << 8 | 0xaa;
@@ -2740,6 +2786,8 @@ static int mmc_power_init(struct mmc *mmc)
 static void mmc_set_initial_state(struct mmc *mmc)
 {
 	int err;
+
+	debug("%s:\n", __func__);
 
 	/* First try to set 3.3V. If it fails set to 1.8V */
 	err = mmc_set_signal_voltage(mmc, MMC_SIGNAL_VOLTAGE_330);
@@ -2808,6 +2856,8 @@ int mmc_get_op_cond(struct mmc *mmc, bool quiet)
 {
 	bool uhs_en = supports_uhs(mmc->cfg->host_caps);
 	int err;
+
+	debug("%s:\n", __func__);
 
 	if (mmc->has_init)
 		return 0;
@@ -2895,6 +2945,8 @@ int mmc_start_init(struct mmc *mmc)
 	bool no_card;
 	int err = 0;
 
+	debug("%s:\n", __func__);
+
 	/*
 	 * all hosts are capable of 1 bit bus-width and able to use the legacy
 	 * timings.
@@ -2951,21 +3003,27 @@ static int mmc_complete_init(struct mmc *mmc)
 {
 	int err = 0;
 
+	debug("%s:\n", __func__);
+	
 	mmc->init_in_progress = 0;
+	
 	if (mmc->op_cond_pending)
 		err = mmc_complete_op_cond(mmc);
 
 	if (!err)
 		err = mmc_startup(mmc);
+
 	if (err)
 		mmc->has_init = 0;
 	else
 		mmc->has_init = 1;
+	
 	return err;
 }
 
 int mmc_init(struct mmc *mmc)
 {
+	debug("%s:\n", __func__);
 	int err = 0;
 	__maybe_unused ulong start;
 #if CONFIG_IS_ENABLED(DM_MMC)
@@ -2974,7 +3032,10 @@ int mmc_init(struct mmc *mmc)
 	upriv->mmc = mmc;
 #endif
 	if (mmc->has_init)
+	{
+		debug("%s: has_init is true, returning zero\n", __func__);
 		return 0;
+	}
 
 	start = get_timer(0);
 
@@ -2983,8 +3044,12 @@ int mmc_init(struct mmc *mmc)
 
 	if (!err)
 		err = mmc_complete_init(mmc);
+
 	if (err)
+	{
+		debug("%s: err=%d, time=%lu\n", __func__, err, get_timer(start));
 		pr_info("%s: %d, time %lu\n", __func__, err, get_timer(start));
+	}
 
 	return err;
 }

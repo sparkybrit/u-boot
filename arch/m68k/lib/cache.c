@@ -59,12 +59,12 @@ void icache_enable(void)
 
 void icache_disable(void)
 {
-	u32 temp = 0;
-
 	*cf_icache_status = 0;
 	icache_invalid();
 
 #if defined(CONFIG_CF_V2) || defined(CONFIG_CF_V3) || defined(CONFIG_CF_V4) || defined(CFG_CF_V4E)
+	u32 temp = 0;
+
 	__asm__ __volatile__("movec %0, %%acr0"::"r"(temp));
 	__asm__ __volatile__("movec %0, %%acr1"::"r"(temp));
 #endif
@@ -131,12 +131,12 @@ void dcache_enable(void)
 
 void dcache_disable(void)
 {
-	u32 temp = 0;
-
 	*cf_dcache_status = 0;
 	dcache_invalid();
 
 #if defined(CONFIG_CF_V4) || defined(CFG_CF_V4E)
+	u32 temp = 0;
+
 	__asm__ __volatile__("movec %0, %%cacr"::"r"(temp));
 	__asm__ __volatile__("movec %0, %%acr0"::"r"(temp));
 	__asm__ __volatile__("movec %0, %%acr1"::"r"(temp));
