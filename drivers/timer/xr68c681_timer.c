@@ -11,7 +11,7 @@
 #include <timer.h>
 #include <linux/compiler.h>
 #include <asm/immap.h>
-#include <asm/uart.h>
+#include <xr68c681.h>
 #include <irq_func.h>
 
 #define	IRQ_TIMER_VECTOR 0
@@ -23,7 +23,7 @@ static volatile u64 counter;
 
 static void timer_interrupt_handler(void *arg)
 {
-	uart_t *base = (uart_t *)arg;
+	xr68c681_t *base = (xr68c681_t *)arg;
 
 	/* reset the timer interrupt */
 	readb(&base->uopc);
@@ -41,7 +41,7 @@ static u64 xr68c681_timer_get_count(struct udevice *dev)
 static int xr68c681_timer_probe(struct udevice *dev)
 {
 	struct mc68681_plat *plat = dev_get_plat(dev);
-	uart_t *base = (uart_t *)(plat->base);
+	xr68c681_t *base = (xr68c681_t *)(plat->base);
 
 	/* generate an interrupt every 10ms (100Hz): N=0x0480=1152,
 	 * f = (3.6864MHz/16) / (2*1152) = 100Hz */
