@@ -25,7 +25,7 @@
 #include <serial.h>
 #include <linux/compiler.h>
 #include <asm/immap.h>
-#include <asm/uart.h>
+#include <xr68c681.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -62,7 +62,7 @@ static const struct brg_entry brg_table[] = {
 	{ 38400, 0xCC,  true },
 };
 
-static void xr68c681_serial_setbrg_common(uart_t *uart, int baudrate)
+static void xr68c681_serial_setbrg_common(xr68c681_t *uart, int baudrate)
 {
 	int i;
 
@@ -88,7 +88,7 @@ static void xr68c681_serial_setbrg_common(uart_t *uart, int baudrate)
 	writeb(UART_UCR_RX_ENABLED | UART_UCR_TX_ENABLED, &uart->ucr);
 }
 
-static int xr68c681_serial_init_common(uart_t *uart, int port_idx, int baudrate)
+static int xr68c681_serial_init_common(xr68c681_t *uart, int port_idx, int baudrate)
 {
 	uart_port_conf(port_idx);
 
@@ -118,14 +118,14 @@ static int xr68c681_serial_probe(struct udevice *dev)
 
 	debug("%s: port=%d)\n", __func__, plat->port);
 
-	return xr68c681_serial_init_common((uart_t *)plat->base,
+	return xr68c681_serial_init_common((xr68c681_t *)plat->base,
 						plat->port, plat->baudrate);
 }
 
 static int xr68c681_serial_putc(struct udevice *dev, const char ch)
 {
 	struct mc68681_plat *plat = dev_get_plat(dev);
-	uart_t *uart = (uart_t *)plat->base;
+	xr68c681_t *uart = (xr68c681_t *)plat->base;
 
 	/* Wait for last character to go. */
 	if (!(readb(&uart->usr) & UART_USR_TXRDY))
@@ -139,7 +139,7 @@ static int xr68c681_serial_putc(struct udevice *dev, const char ch)
 static int xr68c681_serial_getc(struct udevice *dev)
 {
 	struct mc68681_plat *plat = dev_get_plat(dev);
-	uart_t *uart = (uart_t *)(plat->base);
+	xr68c681_t *uart = (xr68c681_t *)(plat->base);
 
 	/* Wait for a character to arrive. */
 	if (!(readb(&uart->usr) & UART_USR_RXRDY))
@@ -151,7 +151,7 @@ static int xr68c681_serial_getc(struct udevice *dev)
 int xr68c681_serial_setbrg(struct udevice *dev, int baudrate)
 {
 	struct mc68681_plat *plat = dev_get_plat(dev);
-	uart_t *uart = (uart_t *)(plat->base);
+	xr68c681_t *uart = (xr68c681_t *)(plat->base);
 
 	xr68c681_serial_setbrg_common(uart, baudrate);
 
@@ -161,7 +161,7 @@ int xr68c681_serial_setbrg(struct udevice *dev, int baudrate)
 static int xr68c681_serial_pending(struct udevice *dev, bool input)
 {
 	struct mc68681_plat *plat = dev_get_plat(dev);
-	uart_t *uart = (uart_t *)(plat->base);
+	xr68c681_t *uart = (xr68c681_t *)(plat->base);
 
 	if (input)
 		return readb(&uart->usr) & UART_USR_RXRDY ? 1 : 0;

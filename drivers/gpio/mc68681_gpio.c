@@ -11,7 +11,7 @@
 #include <errno.h>
 #include <dm.h>
 #include <asm/gpio.h>
-#include <asm/uart.h>
+#include <xr68c681.h>
 #include <asm/io.h>
 #include <dm/device_compat.h>
 #include <dt-bindings/gpio/gpio.h>
@@ -21,7 +21,7 @@ static int mc68681_gpio_get_value(struct udevice *dev, uint offset)
 {
 	struct mc68681_plat *plat = dev_get_plat(dev);
 	struct gpio_dev_priv *uc_priv = dev_get_uclass_priv(dev);
-	uart_t *uart = (uart_t *)dev_read_addr(dev);
+	xr68c681_t *uart = (xr68c681_t *)dev_read_addr(dev);
 	int val = 0;
 
 	if (uc_priv->gpio_count == 8)
@@ -41,7 +41,7 @@ static int mc68681_gpio_get_value(struct udevice *dev, uint offset)
 static int mc68681_gpio_direction_output(struct udevice *dev, uint offset, int val)
 {
 	struct mc68681_plat *plat = dev_get_plat(dev);
-	uart_t *uart = (uart_t *)dev_read_addr(dev);
+	xr68c681_t *uart = (xr68c681_t *)dev_read_addr(dev);
 
 	// XXX check that offset is less than gpio_count 
 	//struct gpio_dev_priv *uc_priv = dev_get_uclass_priv(dev);
@@ -96,7 +96,7 @@ static int mc68681_gpio_probe(struct udevice *dev)
 {
 	struct mc68681_plat *plat = dev_get_plat(dev);
 	struct gpio_dev_priv *uc_priv = dev_get_uclass_priv(dev);
-	uart_t *uart = (uart_t *)dev_read_addr(dev);
+	xr68c681_t *uart = (xr68c681_t *)dev_read_addr(dev);
 	char name[32], label[8], *str;
 	int size;
 	const u8 *tmp;

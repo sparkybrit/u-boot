@@ -10,7 +10,6 @@
 #include <watchdog.h>
 #include <asm/immap.h>
 #include <asm/io.h>
-#include <asm/uart.h>
 
 #if defined(CONFIG_CMD_NET)
 #include <config.h>
