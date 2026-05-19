@@ -124,7 +124,18 @@ typedef struct uart
 #define UART_UCR_RX_DISABLED		(0x02)
 #define UART_UCR_RX_ENABLED		(0x01)
 
+/*
+ * XR68C681 BRG Select Extend Bit commands (Table 10).
+ * These use CR[3:0]; the misc-command nibble CR[7:4] must be zero.
+ * Setting X=1 selects the extended baud-rate column in Table 8.
+ */
+#define UART_UCR_SET_RX_EXTEND		(0x08)	/* Set   Rx BRG extend bit (X=1) */
+#define UART_UCR_CLR_RX_EXTEND		(0x09)	/* Clear Rx BRG extend bit (X=0) */
+#define UART_UCR_SET_TX_EXTEND		(0x0A)	/* Set   Tx BRG extend bit (X=1) */
+#define UART_UCR_CLR_TX_EXTEND		(0x0B)	/* Clear Tx BRG extend bit (X=0) */
+
 /* Bit definitions and macros for UACR */
+/* ACR=0xF0: BRG Set 2 (bit 7), Timer mode X1/CLK÷16 (bits 6:4 = 111) */
 #define UART_UACR_CLK			(0xF0)
 
 /* Bit definitions and macros for UIPCR */
