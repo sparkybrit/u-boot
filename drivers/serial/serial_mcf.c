@@ -21,7 +21,7 @@
 #include <serial.h>
 #include <linux/compiler.h>
 #include <asm/immap.h>
-#include <asm/uart.h>
+#include <asm/coldfire/uart.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
