@@ -17,8 +17,6 @@ To incrementally rebase `sparky` onto the new master, rebase through each stable
 
 ## What this fork adds (sparky branch summary)
 
-48 files changed across 7 commits:
-
 ### New CPU support — `arch/m68k/cpu/mc68030/`
 - `start.S` — reset vector, early 68030 init, cache setup, jump to `board_init_f`
 - `cpu.c` — `cpu_init()`, `watchdog_reset()`
@@ -30,7 +28,7 @@ To incrementally rebase `sparky` onto the new master, rebase through each stable
 - `Kconfig`, `Makefile`, `sparky1.c` — board init, `checkboard()`, `dram_init()`
 - `configs/sparky1_defconfig` — full build configuration
 - `include/configs/sparky1.h` — legacy config header
-- `arch/m68k/dts/sparky1.dts` — device tree: XR68C681 DUART at 0x80000000 (UART, timer, GPIO), SPI at 0xC0000000 with MMC-SPI slot
+- `arch/m68k/dts/sparky1.dts` — device tree: XR68C681 DUART at 0x80000000 (UART, timer, GPIO)
 
 ### XR68C681 DUART drivers
 - `drivers/serial/xr68c681_serial.c` — serial driver (UCLASS_SERIAL)
@@ -40,15 +38,11 @@ To incrementally rebase `sparky` onto the new master, rebase through each stable
 - `include/dm/platform_data/mc68681.h` — shared DM platform data struct (`mc68681_plat`)
 - Compatible strings: `exar,xr68c681` (serial), `exar,xr68c681_timer` (timer), `motorola,mc68681_gpio` (GPIO)
 
-### SPI controller — `drivers/spi/sparky1_spi.c`
-Custom SPI driver for the sparky1 (UCLASS_SPI), used for the MMC/SD card slot.
-
 ### Modified upstream files
 - `arch/m68k/include/asm/uart.h` → moved to `arch/m68k/include/asm/coldfire/uart.h` (restored to upstream ColdFire content; `serial_mcf.c` updated to match)
 - `arch/m68k/lib/cache.c`, `interrupts.c` — extended for 68030 (non-ColdFire) builds
 - `arch/m68k/lib/Makefile` — split ARCH_COLDFIRE bundle; common files now `obj-y`, ColdFire-only (`bdinfo.o`) stays conditional
 - `arch/m68k/Kconfig` — added `MC680x0`, `MC68030`, `TARGET_SPARKY1` alongside upstream's QEMU m68k additions
-- `drivers/mmc/mmc.c`, `mmc_spi.c`, `cmd/mmc.c` — debug additions for SPI MMC bring-up
 - `lib/time.c`, `drivers/timer/timer-uclass.c` — minor fixes
 
 ## XR68C681 DUART — key implementation notes
@@ -96,7 +90,6 @@ The counter/timer runs at 100 Hz: N=0x0480 (1152), f = (3.6864 MHz / 16) / (2 ×
 | `drivers/serial/xr68c681_serial.c` | XR68C681 serial driver |
 | `drivers/timer/xr68c681_timer.c` | XR68C681 timer driver |
 | `drivers/gpio/mc68681_gpio.c` | XR68C681 GPIO (output port) driver |
-| `drivers/spi/sparky1_spi.c` | Sparky1 SPI controller driver |
 | `drivers/serial/serial_mcf.c` | ColdFire serial driver (uses `<asm/coldfire/uart.h>`) |
 
 ## Build
