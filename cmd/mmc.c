@@ -24,17 +24,17 @@ static int curr_device = -1;
 static void print_mmcinfo(struct mmc *mmc)
 {
 	int i;
-	debug("%s:\n", __func__);
+
 	printf("Device: %s\n", mmc->cfg->name);
 	printf("Manufacturer ID: %x\n", mmc->cid[0] >> 24);
 	if (IS_SD(mmc)) {
 		printf("OEM: %x\n", (mmc->cid[0] >> 8) & 0xffff);
-		printf("Name: %c%c%c%c%c \n", mmc->cid[0] & 0xff,
+		printf("Name: %c%c%c%c%c\n", mmc->cid[0] & 0xff,
 		(mmc->cid[1] >> 24), (mmc->cid[1] >> 16) & 0xff,
 		(mmc->cid[1] >> 8) & 0xff, mmc->cid[1] & 0xff);
 	} else {
 		printf("OEM: %x\n", (mmc->cid[0] >> 8) & 0xff);
-		printf("Name: %c%c%c%c%c%c \n", mmc->cid[0] & 0xff,
+		printf("Name: %c%c%c%c%c%c\n", mmc->cid[0] & 0xff,
 		(mmc->cid[1] >> 24), (mmc->cid[1] >> 16) & 0xff,
 		(mmc->cid[1] >> 8) & 0xff, mmc->cid[1] & 0xff,
 		(mmc->cid[2] >> 24));
@@ -138,10 +138,8 @@ static struct mmc *__init_mmc_device(int dev, bool force_init,
 				     enum bus_mode speed_mode)
 {
 	struct mmc *mmc;
-	debug("%s\n", __func__);
 	mmc = find_mmc_device(dev);
-	if (!mmc) 
-	{
+	if (!mmc) {
 		printf("no mmc device at slot %x\n", dev);
 		return NULL;
 	}
@@ -156,24 +154,18 @@ static struct mmc *__init_mmc_device(int dev, bool force_init,
 		mmc->user_speed_mode = speed_mode;
 
 	if (mmc_init(mmc))
-	{
-		debug("%s: mmc_init() returns non-zero\n", __func__);
 		return NULL;
-	}
 
 #ifdef CONFIG_BLOCK_CACHE
 	struct blk_desc *bd = mmc_get_blk_desc(mmc);
 	blkcache_invalidate(bd->uclass_id, bd->devnum);
 #endif
 
-	debug("%s: retuning a valid struct mmc\n", __func__);
 	return mmc;
 }
 
 static struct mmc *init_mmc_device(int dev, bool force_init)
 {
-	debug("%s\n", __func__);
-
 	return __init_mmc_device(dev, force_init, MMC_MODES_END);
 }
 
@@ -181,8 +173,6 @@ static int do_mmcinfo(struct cmd_tbl *cmdtp, int flag, int argc,
 		      char *const argv[])
 {
 	struct mmc *mmc;
-
-	debug("%s:\n", __func__);
 
 	if (curr_device < 0) {
 		if (get_mmc_num() > 0)
@@ -194,13 +184,8 @@ static int do_mmcinfo(struct cmd_tbl *cmdtp, int flag, int argc,
 	}
 
 	mmc = init_mmc_device(curr_device, false);
-
 	if (!mmc)
-	{
-		debug("%s: init_mmc_device retunred NULL\n", __func__);
-
 		return CMD_RET_FAILURE;
-	}
 
 	print_mmcinfo(mmc);
 	return CMD_RET_SUCCESS;
