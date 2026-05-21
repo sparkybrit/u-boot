@@ -8,6 +8,7 @@
  */
 
 #include <stdio.h>
+#include <log.h>
 #include <irq_func.h>
 #include <watchdog.h>
 #include <asm/processor.h>
