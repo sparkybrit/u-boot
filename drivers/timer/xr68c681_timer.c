@@ -3,7 +3,6 @@
  * (C) Copyright 2023  Graeme Harker <graeme.harker@gmail.com>
  */
 
-#include <common.h>
 #include <dm.h>
 #include <asm/global_data.h>
 #include <dm/platform_data/mc68681.h>
