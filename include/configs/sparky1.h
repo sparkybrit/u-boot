@@ -41,15 +41,14 @@
 #define CFG_SYS_CLK			16000000
 
 /*-----------------------------------------------------------------------
- * Definitions for initial stack pointer and data area (in DPRAM)
+ * Definitions for pre-relocation global data, stack and heap (at the bottom of SRAM)
  */
 #define CFG_SYS_INIT_RAM_ADDR	0x40000000
-#define CFG_SYS_INIT_RAM_SIZE	0x10000	/* Size of used area in internal SRAM    */
+#define CFG_SYS_INIT_RAM_SIZE	0x10000	
 
 /*-----------------------------------------------------------------------
  * Start addresses for the final memory configuration
  * (Set up by the startup code)
- * Please note that CFG_SYS_SDRAM_BASE _must_ start at 0
  */
 #define CFG_SYS_SDRAM_BASE		0x40000000
 #define CFG_SYS_SDRAM_SIZE		0x00400000
@@ -68,14 +67,5 @@
 #ifdef CONFIG_SYS_FLASH_CFI
 #	define CFG_SYS_FLASH_SIZE		0x40000	/* Max size that the board might have */
 #endif
-
-/*-----------------------------------------------------------------------
- * Cache Configuration
- */
-
-#define ICACHE_STATUS			(CFG_SYS_INIT_RAM_ADDR + \
-					 CFG_SYS_INIT_RAM_SIZE - 8)
-#define DCACHE_STATUS			(CFG_SYS_INIT_RAM_ADDR + \
-					 CFG_SYS_INIT_RAM_SIZE - 4)
 
 #endif				/* _SPARKY1_H */
