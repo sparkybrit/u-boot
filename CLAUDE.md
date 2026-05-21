@@ -91,6 +91,134 @@ The counter/timer runs at 100 Hz: N=0x0480 (1152), f = (3.6864 MHz / 16) / (2 ×
 | `drivers/timer/xr68c681_timer.c` | XR68C681 timer driver |
 | `drivers/gpio/mc68681_gpio.c` | XR68C681 GPIO (output port) driver |
 | `drivers/serial/serial_mcf.c` | ColdFire serial driver (uses `<asm/coldfire/uart.h>`) |
+| `doc/board/sparky/index.rst` | Sphinx toctree entry for sparky board docs |
+| `doc/board/sparky/sparky1.rst` | Hardware overview, build instructions, peripheral support |
+
+## Boot sequence — sparky1
+
+### Phase 0 — start.S (from flash, before relocation and before C)
+
+```
+reset vector fetch (0x000004 → _start)
+arch/m68k/cpu/mc68030/start.S:_start
+  ├─ %sr = 0x2700                                             disable all interrupts
+  ├─ %a5 = __got_start                                        set %a5 to the linker's Global Offset Table in Flash
+  ├─ %sp = CFG_SYS_INIT_RAM_ADDR + CFG_SYS_INIT_RAM_SIZE      set %sp to top of the init ram area (0x4001:0000)
+  ├─ common/init/board_init.c:board_init_f_alloc_reserve()    reserve space for global_data at top of init ram 
+  ├─ common/init/board_init.c:board_init_f_init_reserve()     zero the global_data struct
+  ├─ arch/m68k/cpu/mc68030/cpu_init.c:cpu_init_f()
+  │    ├─ arch/m68k/lib/cache.c:icache_enable()               invalidate and enable instruction cache
+  │    └─ arch/m68k/lib/cache.c:dcache_enable()               invalidate and enable data cache
+  └─ common/board_f.c:board_init_f(0)                         
+```
+
+### Phase 1 — board_init_f (common/board_f.c, still in flash)
+
+```
+common/board_f.c:initcall_run_f()
+  ├─ setup_mon_len()                         gd->mon_length = _bss_end - CONFIG_SYS_MONITOR_BASE
+  ├─ lib/fdtdec.c:fdtdec_setup()             locate FDT blob
+  ├─ trace_early_init()                      CONFIG_TRACE_EARLY
+  ├─ initf_malloc()                          pre-reloc malloc arena
+  ├─ common/log.c:log_init()
+  ├─ initf_bootstage()
+  ├─ event_init()
+  ├─ arch_cpu_init()                                          no-op (no mc68030 override)
+  ├─ initf_dm()
+  │    ├─ drivers/core/root.c:dm_init_and_scan(true)          bind pre-reloc DM devices from FDT
+  │    │    └─ binds xr68c681 serial, timer, gpio from sparky1.dts
+  │    └─ dm_autoprobe()
+  ├─ arch/m68k/cpu/mc68030/speed.c:get_clocks()
+  │    └─ gd->cpu_clk = CFG_SYS_CLK                           (16 MHz)
+  ├─ timer_init()                                             weak no-op (DM timer, not TIMER_EARLY)
+  ├─ env/env.c:env_init()
+  ├─ init_baud_rate()                                         gd->baudrate = 115200
+  ├─ serial_init()                                            probes xr68c681_serial (DM_FLAG_PRE_RELOC)
+  │    └─ drivers/serial/xr68c681_serial.c:xr68c681_serial_probe()
+  │         └─ xr68c681_serial_init_common()
+  │              ├─ RESET_RX/TX/ERROR/MR
+  │              ├─ uimr = 0                      mask all interrupts
+  │              ├─ uacr = 0xF0                   BRG Set 2, timer mode X1/CLK÷16
+  │              ├─ umr = 0x13                    MR1: 8 data bits, no parity
+  │              ├─ umr = 0x07                    MR2: 1 stop bit
+  │              └─ xr68c681_serial_setbrg_common(115200)
+  │                   ├─ SET_RX_EXTEND / SET_TX_EXTEND   (X=1)
+  │                   ├─ ucsr = 0x88
+  │                   └─ RX_ENABLED | TX_ENABLED
+  ├─ common/console.c:console_init_f()
+  ├─ lib/display_options.c:display_options()                  
+  │    └─ "U-Boot 2026.04 ..."
+  ├─ arch/m68k/cpu/mc68030/cpu.c:print_cpuinfo()
+  │    └─ "CPU:   Motorola MC68030"
+  ├─ board/sparky/sparky1/sparky1.c:show_board_info() → checkboard()
+  │    └─ "Board: Sparky1"
+  ├─ announce_dram_init()
+  │    └─ "DRAM:  "
+  ├─ board/sparky/sparky1/sparky1.c:dram_init()
+  │    └─ gd->ram_size = CFG_SYS_SDRAM_SIZE
+  ├─ setup_dest_addr()                      pick relocation address (top of RAM)
+  ├─ reserve_uboot/malloc/board/global_data/fdt/stacks()
+  ├─ dram_init_banksize()
+  ├─ show_dram_config()
+  ├─ setup_bdinfo()
+  ├─ reloc_fdt()
+  ├─ setup_reloc()
+  └─ jump_to_copy() → arch/m68k/cpu/mc68030/start.S:relocate_code()
+```
+
+### Relocation — relocate_code (start.S)
+
+```
+arch/m68k/cpu/mc68030/start.S:relocate_code(new_sp, gd, dest_addr)
+  ├─ copy flash → RAM (longword loop)
+  ├─ clear BSS
+  ├─ fix GOT table (add relocation offset to every entry)
+  └─ jmp board_init_r
+```
+
+### Phase 2 — board_init_r (common/board_r.c, running from RAM)
+
+```
+common/board_r.c:initcall_run_r()
+  ├─ initr_trace() / initr_reloc()
+  ├─ initr_reloc_global_data()               fix gd pointers after relocation
+  ├─ initr_malloc()                          full post-reloc heap active
+  ├─ common/log.c:log_init() / common/board_r.c:initr_bootstage()
+  ├─ initr_of_live()                         build live DT tree
+  ├─ initr_dm()                              full DM re-init in RAM
+  │    ├─ drivers/core/root.c:dm_init_and_scan(false)
+  │    └─ dm_autoprobe()
+  ├─ initr_lmb()
+  ├─ initr_dm_devices()                      no dm_timer_init (TIMER_EARLY not set)
+  ├─ stdio_init_tables()
+  ├─ drivers/serial/serial-uclass.c:serial_initialize()       re-probe xr68c681_serial in RAM context
+  ├─ initr_announce()
+  ├─ arch/m68k/lib/traps.c:arch_initr_trap()
+  │    └─ trap_init(CFG_SYS_SDRAM_BASE)
+  │         ├─ write _exc_handler → vectors 2–24, 32–63 in RAM table
+  │         ├─ write _int_handler → vectors 25–31, 64–255 in RAM table
+  │         └─ setvbr(CFG_SYS_SDRAM_BASE)      point VBR at RAM vector table
+  ├─ power_init_board()                                        weak no-op
+  ├─ arch/m68k/cpu/mc68030/cpu_init.c:cpu_init_r()            no-op
+  ├─ initr_env()                             load environment variables
+  ├─ common/stdio.c:stdio_add_devices()
+  ├─ common/console.c:console_init_r()                        full console active
+  ├─ arch/m68k/cpu/mc68030/interrupts.c:interrupt_init()
+  │    └─ arch/m68k/lib/interrupts.c:enable_interrupts()      %sr interrupt mask → 0
+  ├─ drivers/timer/timer-uclass.c:dm_timer_init()             M68K timer_init() path
+  │    └─ drivers/timer/xr68c681_timer.c:xr68c681_timer_probe()
+  │         ├─ uctu/uctl = 0x04/0x80            N=0x0480 → 100 Hz
+  │         ├─ uacr = 0xF0                      BRG Set 2 + timer mode
+  │         ├─ ivr = 0x40
+  │         ├─ arch/m68k/lib/interrupts.c:irq_install_handler()   register timer_interrupt_handler
+  │         └─ uimr = 0x08                      enable counter/timer interrupt
+  └─ common/board_r.c:run_main_loop() → common/main.c:main_loop()
+```
+
+**Notes:**
+- `TIMER_EARLY` is not set — the timer is not available during `board_init_f`. Any `get_timer()` call before `timer_init` in phase 2 would trigger a lazy `dm_timer_init()`, which would panic as the timer device isn't probed yet pre-relocation.
+- `board_early_init_f`, `board_init`, `board_late_init`, `misc_init_r` are all not configured and are skipped.
+- The XR68C681 serial driver carries `DM_FLAG_PRE_RELOC` so it is bound and probed before relocation, then re-probed in RAM after relocation.
 
 ## Build
 
@@ -110,20 +238,20 @@ The 68030 requires `-mcpu=68030` (not `-mcpu=5307` or any ColdFire flag). Verify
 |---------|--------------|--------------------------|
 | ISA | Full m68k (including MOVES, BFINS, etc.) | Reduced ColdFire ISA subset |
 | MMU | External PMMU (68851 integrated in 68030) | Optional in some MCF variants |
-| Cache | Separate I/D caches with CACR | Unified cache, different CACR layout |
+| Cache | Separate I/D caches with %cacr | Unified cache, different %cacr layout |
 | Stack alignment | 2-byte word | 4-byte long word (ColdFire ABI) |
-| `start.S` cache init | CACR/CAAR registers | ColdFire-specific cache ops |
+| `start.S` cache init | %cacr/%caar registers | ColdFire-specific cache ops |
 | Exception stack frame | Variable-length with format/vector word | Fixed 8-byte frame |
 
 ### Exception stack frame differences
 
-**Classic 68030** uses variable-length frames. All frames begin with the same 8-byte base (from low to high address at SP):
+**Classic 68030** uses variable-length frames. All frames begin with the same 8-byte base (from low to high address at %sp):
 
 ```
-SP+0  format/vector word  [15:12] = frame format code, [11:0] = vector offset (vector# × 4)
-SP+2  old PC (high word)
-SP+4  old PC (low word)
-SP+6  old SR
+%sp+0  format/vector word  [15:12] = frame format code, [11:0] = vector offset (vector# × 4)
+%sp+2  old PC (high word)
+%sp+4  old PC (low word)
+%sp+6  old %sr
 ```
 
 | Format | Total size | Used for |
