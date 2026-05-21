@@ -7,7 +7,6 @@
  * TsiChung Liew (Tsi-Chung.Liew@freescale.com)
  */
 
-#include <common.h>
 #include <asm/io.h>
 #include <irq_func.h>
 
