@@ -51,14 +51,14 @@ The XR68C681 is Exar's version of the MC68C681 Dual UART with extended features.
 
 ### Baud rate generation (XR68C681-specific)
 
-The XR68C681 has a per-channel **BRG extend bit (X bit)** that selects an extended column in the BRG rate table. It is set/cleared via CR commands (not a register field):
+The XR68C681 has a per-channel **BRG extend bit (X bit)** that selects an extended column in the BRG rate table. It is set/cleared via CR Miscellaneous Commands (Table 3 of the datasheet), which live in the **upper nibble CR[7:4]**; the lower nibble CR[3:0] must be zero to avoid TX/RX side-effects:
 
 | Command | Value | Effect |
 |---------|-------|--------|
-| `UART_UCR_SET_RX_EXTEND` | `0x08` | Set Rx X=1 (extended rates) |
-| `UART_UCR_CLR_RX_EXTEND` | `0x09` | Clear Rx X=0 |
-| `UART_UCR_SET_TX_EXTEND` | `0x0A` | Set Tx X=1 |
-| `UART_UCR_CLR_TX_EXTEND` | `0x0B` | Clear Tx X=0 |
+| `UART_UCR_SET_RX_EXTEND` | `0x80` | Set Rx X=1 (extended rates) |
+| `UART_UCR_CLR_RX_EXTEND` | `0x90` | Clear Rx X=0 |
+| `UART_UCR_SET_TX_EXTEND` | `0xA0` | Set Tx X=1 |
+| `UART_UCR_CLR_TX_EXTEND` | `0xB0` | Clear Tx X=0 |
 
 115200 baud requires CSR=`0x88` **plus** X=1 on both channels. CSR=`0xBB` alone gives 9600, not 115200.
 

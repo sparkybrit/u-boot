@@ -207,3 +207,40 @@ U_BOOT_DRIVER(xr68c681_serial) = {
 	.ops = &xr68c681_serial_ops,
 	.flags = DM_FLAG_PRE_RELOC,
 };
+
+#ifdef CONFIG_DEBUG_UART_XR68C681
+
+#include <debug_uart.h>
+
+static inline void _debug_uart_init(void)
+{
+	volatile u8 *uart = (volatile u8 *)CONFIG_DEBUG_UART_BASE;
+
+	uart[2] = 0x20;		/* RESET_RX */
+	uart[2] = 0x30;		/* RESET_TX */
+	uart[2] = 0x40;		/* RESET_ERROR */
+	uart[2] = 0x10;		/* RESET_MR */
+	uart[5] = 0x00;		/* mask all interrupts */
+	uart[4] = 0xF0;		/* ACR: BRG Set 2 + timer mode X1/CLK÷16 */
+	uart[0] = 0x13;		/* MR1: 8 bits, no parity */
+	uart[0] = 0x07;		/* MR2: 1 stop bit */
+	uart[2] = 0x20;		/* RESET_RX */
+	uart[2] = 0x30;		/* RESET_TX */
+	uart[2] = 0x80;		/* SET_RX_EXTEND (X=1 for 115200) */
+	uart[2] = 0xA0;		/* SET_TX_EXTEND (X=1 for 115200) */
+	uart[1] = 0x88;		/* CSR: 115200 baud */
+	uart[2] = 0x05;		/* RX_ENABLED | TX_ENABLED */
+}
+
+static inline void _debug_uart_putc(int ch)
+{
+	volatile u8 *uart = (volatile u8 *)CONFIG_DEBUG_UART_BASE;
+
+	while (!(uart[1] & 0x04))	/* wait for USR.TXRDY */
+		;
+	uart[3] = ch;			/* write to UTB */
+}
+
+DEBUG_UART_FUNCS
+
+#endif
