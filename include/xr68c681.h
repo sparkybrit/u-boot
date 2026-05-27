@@ -131,14 +131,15 @@ typedef struct xr68c681 {
 #define UART_UCR_RX_ENABLED		(0x01)
 
 /*
- * XR68C681 BRG Select Extend Bit commands (Table 10).
- * Written to CR[3:0]; CR[7:4] must be zero.
+ * XR68C681 BRG Select Extend Bit commands (Table 3, upper nibble).
+ * The Command Register upper nibble [7:4] carries the Miscellaneous Command;
+ * lower nibble [3:0] must be zero (no TX/RX enable/disable side-effect).
  * X=1 selects the extended baud-rate column (Table 8).
  */
-#define UART_UCR_SET_RX_EXTEND		(0x08)	/* Set   Rx BRG extend bit (X=1) */
-#define UART_UCR_CLR_RX_EXTEND		(0x09)	/* Clear Rx BRG extend bit (X=0) */
-#define UART_UCR_SET_TX_EXTEND		(0x0A)	/* Set   Tx BRG extend bit (X=1) */
-#define UART_UCR_CLR_TX_EXTEND		(0x0B)	/* Clear Tx BRG extend bit (X=0) */
+#define UART_UCR_SET_RX_EXTEND		(0x80)	/* Set   Rx BRG extend bit (X=1) */
+#define UART_UCR_CLR_RX_EXTEND		(0x90)	/* Clear Rx BRG extend bit (X=0) */
+#define UART_UCR_SET_TX_EXTEND		(0xA0)	/* Set   Tx BRG extend bit (X=1) */
+#define UART_UCR_CLR_TX_EXTEND		(0xB0)	/* Clear Tx BRG extend bit (X=0) */
 
 /*********************************************************************
  * UIPCR — Input Port Change Register / UACR — Auxiliary Control Register

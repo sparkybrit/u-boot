@@ -61,7 +61,11 @@ static int xr68c681_timer_probe(struct udevice *dev)
 	irq_install_handler(IRQ_TIMER_VECTOR, (interrupt_handler_t *)timer_interrupt_handler, base);
 
 	/* enable counter/timer interrupts */
-	writeb(IRQ_TIMER_MASK, &base->uimr);	
+	writeb(IRQ_TIMER_MASK, &base->uimr);
+
+	/* start the counter/timer: reading offset 0x0E is the Start Counter
+	 * address-triggered command (Table 1, datasheet). */
+	(void)readb(&base->uops);
 
 	return (0);
 }

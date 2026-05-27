@@ -115,6 +115,11 @@ _start:
 	move.l	#cpu_init_f, %a1
 	jsr	(%a1)
 
+#ifdef CONFIG_DEBUG_UART
+	move.l	#debug_uart_init, %a1
+	jsr	(%a1)
+#endif
+
 	/* run low-level board init code (from flash) */
 	clr.l	%sp@-
 	move.l	#board_init_f, %a1
@@ -153,9 +158,86 @@ relocate_code:
 	bgt.s	1b
 
 /*
- * We are done. Do not return, instead branch to second part of board
- * initialization, now running from RAM.
+ * Process .rela.dyn to relocate the RAM copy.
+ *
+ * Without -fPIC/-msep-data the linker emits only R_68K_RELATIVE (22)
+ * relocations for absolute data pointers.  For each entry the addend
+ * (stored in the slot by relocate-rela at build time) equals the
+ * link-time VMA; add the relocation delta (dest_addr - MONITOR_BASE)
+ * to produce the final RAM address.
+ *
+ * Vector-table entries (r_offset < MONITOR_BASE) are not copied to RAM
+ * and are skipped.  R_68K_32 and R_68K_JMP_SLOT paths are retained for
+ * completeness but are currently dead code.
  */
+#define R_68K_32        1
+#define R_68K_RELATIVE  22
+#define R_68K_JMP_SLOT  21
+
+	move.l	#__rel_dyn_start, %a1
+	move.l	#__rel_dyn_end, %a2
+
+fixloop:
+	move.l	(%a1)+, %d1		/* r_offset */
+	move.l	(%a1)+, %d2		/* r_info  */
+	addq.l	#4, %a1			/* skip r_addend (not needed) */
+
+	move.l	%d2, %d3
+	andi.l	#0xff, %d3		/* d3 = reloc type */
+
+	cmp.l	#R_68K_RELATIVE, %d3
+	beq.s	fixup
+	cmp.l	#R_68K_32, %d3
+	beq.s	fixup
+	cmp.l	#R_68K_JMP_SLOT, %d3
+	beq.s	fixup_jmp_slot
+	bra	fixnext
+
+fixup:
+	/* skip vector table (VMA < MONITOR_BASE — not in RAM copy) */
+	cmp.l	#CONFIG_SYS_MONITOR_BASE, %d1
+	bcs.s	fixnext
+	/* RAM address of the slot to update */
+	move.l	%a0, %a3
+	add.l	%d1, %a3
+	sub.l	#CONFIG_SYS_MONITOR_BASE, %a3
+	/* read link-time value, apply relocation delta */
+	move.l	(%a3), %d4
+	add.l	%a0, %d4
+	sub.l	#CONFIG_SYS_MONITOR_BASE, %d4
+	move.l	%d4, (%a3)
+	bra	fixnext
+
+fixup_jmp_slot:
+	/* skip vector table (VMA < MONITOR_BASE — not in RAM copy) */
+	cmp.l	#CONFIG_SYS_MONITOR_BASE, %d1
+	bcs.s	fixnext
+	/* symbol index = r_info >> 8 */
+	move.l	%d2, %d4
+	lsr.l	#8, %d4
+	/* offset into .dynsym (Elf32_Sym = 16 bytes) */
+	lsl.l	#4, %d4
+	move.l	#__dyn_sym_start, %a3
+	add.l	%d4, %a3
+	/* read st_value (offset 4 in Elf32_Sym) from flash */
+	move.l	4(%a3), %d4
+	/* apply relocation delta */
+	add.l	%a0, %d4
+	sub.l	#CONFIG_SYS_MONITOR_BASE, %d4
+	/* write resolved address to GOT.PLT slot in RAM */
+	move.l	%a0, %a3
+	add.l	%d1, %a3
+	sub.l	#CONFIG_SYS_MONITOR_BASE, %a3
+	move.l	%d4, (%a3)
+
+fixnext:
+	cmp.l	%a1, %a2
+	bgt.w	fixloop			/* word form: loop body too large for short branch */
+
+	/* point %a5 at the RAM copy of the GOT */
+	move.l	%a0, %a5
+	add.l	#(__got_start - CONFIG_SYS_MONITOR_BASE), %a5
+
 	move.l	%a0, %a1
 	add.l	#(in_ram - CONFIG_SYS_MONITOR_BASE), %a1
 	jmp	(%a1)
@@ -164,38 +246,24 @@ in_ram:
 
 clear_bss:
 	/*
-	 * Now clear BSS segment
+	 * Clear BSS in the RAM copy.
+	 *
+	 * PC-relative lea avoids R_68K_RELATIVE relocations in this code.
+	 * Running in RAM at dest_addr + offset, lea sym(%pc) resolves to
+	 * dest_addr + (sym_vma - MONITOR_BASE) — the correct RAM address.
 	 */
-	move.l	%a0, %a1
-	add.l	#(_sbss - CONFIG_SYS_MONITOR_BASE),%a1
-	move.l	%a0, %d1
-	add.l	#(_ebss - CONFIG_SYS_MONITOR_BASE),%d1
+	lea	_sbss(%pc), %a1
+	lea	_ebss(%pc), %a2
+	cmpl	%a1, %a2
+	ble.s	7f
 6:
 	clr.l	(%a1)+
-	cmp.l	%a1,%d1
+	cmpl	%a1, %a2
 	bgt.s	6b
-
-	/*
-	 * fix got table in RAM
-	 */
-	move.l	%a0, %a1
-	add.l	#(__got_start - CONFIG_SYS_MONITOR_BASE),%a1
-	move.l	%a1,%a5			/* fix got pointer register a5 */
-
-	move.l	%a0, %a2
-	add.l	#(__got_end - CONFIG_SYS_MONITOR_BASE),%a2
-
 7:
-	move.l	(%a1),%d1
-	sub.l	#_start,%d1
-	add.l	%a0,%d1
-	move.l	%d1,(%a1)+
-	cmp.l	%a2, %a1
-	bne	7b
 
-	/* calculate relative jump to board_init_r in ram */
-	move.l	%a0, %a1
-	add.l	#(board_init_r - CONFIG_SYS_MONITOR_BASE), %a1
+	/* jump to board_init_r in RAM via PC-relative addressing */
+	lea	board_init_r(%pc), %a1
 
 	/* set parameters for board_init_r */
 	move.l	%a0,-(%sp)		/* dest_addr */
