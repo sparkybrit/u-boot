@@ -232,6 +232,92 @@ make CROSS_COMPILE=m68k-linux-gnu- -j$(nproc)
 
 The 68030 requires `-mcpu=68030` (not `-mcpu=5307` or any ColdFire flag). Verify the cross-compiler supports classic m68k ISA — ColdFire-only compilers will not work.
 
+## Testing
+
+### Cache verification
+
+`CONFIG_CMD_CACHE=y` and `CONFIG_CMD_TIME=y` are both set in `configs/sparky1_defconfig`. The XR68C681 timer runs at 100 Hz (10 ms resolution), so each timed operation should run long enough to register — at 16 MHz the 256 KB blocks below typically take several hundred milliseconds.
+
+**Functional test** — verifies data integrity through enable/disable cycles and that `dcache_invalid()` fires correctly on re-enable:
+
+```
+# Verify both caches report enabled at boot
+icache
+dcache
+
+# Write with D-cache ON, disable, read back — write-through means memory is always current
+mw.l 0x40200000 0xdeadbeef 0x40
+md.l 0x40200000 8
+dcache off
+md.l 0x40200000 8
+# Both reads must show 0xdeadbeef
+
+# Write new pattern with cache OFF, re-enable — dcache_enable() calls dcache_invalid()
+# so re-enable must flush any stale lines; if this reads 0xdeadbeef the invalidation is broken
+mw.l 0x40200000 0xcafebabe 0x40
+dcache on
+md.l 0x40200000 8
+# Must show 0xcafebabe
+
+# I-cache toggle — a hang or reset here means pipeline state was corrupted on re-enable
+icache off
+icache on
+icache
+dcache
+```
+
+**Timing test** — compares raw memory throughput with caches off vs on. `mw` exercises the write path; `cmp` reads 128 KB twice (src + dst) with minimal serial output:
+
+```
+# Pre-fill both regions with matching data so cmp won't complain
+mw.l 0x40100000 0xdeadbeef 0x10000
+mw.l 0x40110000 0xdeadbeef 0x10000
+
+echo "--- caches OFF ---"
+icache off
+dcache off
+time mw.l 0x40100000 0x12345678 0x10000
+time cmp.l 0x40100000 0x40110000 0x8000
+
+echo "--- caches ON ---"
+icache on
+dcache on
+time mw.l 0x40100000 0x12345678 0x10000
+time cmp.l 0x40100000 0x40110000 0x8000
+```
+
+The scratch addresses (0x40100000 / 0x40110000) sit in the middle of the 4 MB SDRAM region (0x40000000–0x403FFFFF), well below where U-Boot relocates to near the top. If both timed results round to zero, increase the count to `0x40000` (1 MB). The D-cache speedup is most visible on the `cmp` (read-heavy) operation; `mw` speedup is smaller because the 68030 D-cache is write-through.
+
+### INIT_RAM relocation verification
+
+After relocation, U-Boot must use only the relocated `gd`, stack, and heap in the upper SDRAM — nothing should touch INIT_RAM (0x40000000–0x4000FFFF, the bottom 64 KB of SDRAM) again.
+
+Poison INIT_RAM with a distinctive value, write the same pattern to a reference area above it, exercise U-Boot, then `cmp` the two regions. Any address reported by `cmp` is a location that was written after poisoning — a stale pointer or residual stack/heap use.
+
+```
+# Poison INIT_RAM (64 KB = 0x4000 longwords)
+mw.l 0x40000000 0xdeadc0de 0x4000
+
+# Write same pattern to reference area (above INIT_RAM, below load address at 0x40200000)
+mw.l 0x40020000 0xdeadc0de 0x4000
+
+# Confirm relocated gd, sp, and heap are all up near 0x403xxxxx — not in INIT_RAM
+bdinfo
+
+# Exercise U-Boot to trigger any residual INIT_RAM access
+printenv
+dm tree
+md.l 0x40000000 4
+
+# Compare — "Total of 16384 longwords were the same" means INIT_RAM is clean
+# Any reported address means something still touched INIT_RAM after relocation
+cmp.l 0x40000000 0x40020000 0x4000
+```
+
+If `cmp` flags an address, the offset from `0x40000000` locates which part of INIT_RAM was touched: offsets near zero suggest a stale heap or BSS pointer; offsets near `0xF000` suggest a leftover stack reference (the initial stack and `gd` struct were reserved at the top of INIT_RAM by `board_init_f_alloc_reserve()`).
+
+Run `bdinfo` before poisoning to confirm that `gd`, `sp`, and the malloc arena are all well above `0x4000FFFF`. If any of them appear in the `0x40000xxx` range, relocation did not complete correctly and poisoning would corrupt live data.
+
 ## Key differences: classic m68k vs ColdFire
 
 | Feature | Classic 68030 | ColdFire (MCF530x, etc.) |
