@@ -302,14 +302,17 @@ The scratch addresses (0x40100000 / 0x40110000) sit in the middle of the 4 MB SD
 
 After relocation, U-Boot must use only the relocated `gd`, stack, and heap in the upper SDRAM — nothing should touch INIT_RAM (0x40000000–0x4000FFFF, the bottom 64 KB of SDRAM) again.
 
-Poison INIT_RAM with a distinctive value, write the same pattern to a reference area above it, exercise U-Boot, then `cmp` the two regions. Any address reported by `cmp` is a location that was written after poisoning — a stale pointer or residual stack/heap use.
+**Important:** the exception vector table lives at `0x40000000–0x400003FF` (256 vectors × 4 bytes). Do **not** poison that region — any exception during the test would vector to the poison value and hard-crash. Start poisoning at `0x40000400` (the first byte after the table). The usable poison range is therefore `0x40000400–0x4000FFFF` = 63 KB − 0 = 0x3F00 longwords.
+
+Poison from `0x40000400` with a distinctive value, write the same pattern to a reference area above it, exercise U-Boot, then `cmp` the two regions. Any address reported by `cmp` is a location that was written after poisoning — a stale pointer or residual stack/heap use.
 
 ```
-# Poison INIT_RAM (64 KB = 0x4000 longwords)
-mw.l 0x40000000 0xdeadc0de 0x4000
+# Poison INIT_RAM, skipping the vector table at 0x40000000–0x400003FF
+# 0x3F00 longwords = 63 KB starting at 0x40000400
+mw.l 0x40000400 0xdeadc0de 0x3f00
 
 # Write same pattern to reference area (above INIT_RAM, below load address at 0x40200000)
-mw.l 0x40020000 0xdeadc0de 0x4000
+mw.l 0x40020400 0xdeadc0de 0x3f00
 
 # Confirm relocated gd, sp, and heap are all up near 0x403xxxxx — not in INIT_RAM
 bdinfo
@@ -317,14 +320,14 @@ bdinfo
 # Exercise U-Boot to trigger any residual INIT_RAM access
 printenv
 dm tree
-md.l 0x40000000 4
+md.l 0x40000400 4
 
-# Compare — "Total of 16384 longwords were the same" means INIT_RAM is clean
+# Compare — "Total of 16128 longwords were the same" means INIT_RAM is clean
 # Any reported address means something still touched INIT_RAM after relocation
-cmp.l 0x40000000 0x40020000 0x4000
+cmp.l 0x40000400 0x40020400 0x3f00
 ```
 
-If `cmp` flags an address, the offset from `0x40000000` locates which part of INIT_RAM was touched: offsets near zero suggest a stale heap or BSS pointer; offsets near `0xF000` suggest a leftover stack reference (the initial stack and `gd` struct were reserved at the top of INIT_RAM by `board_init_f_alloc_reserve()`).
+If `cmp` flags an address, the offset from `0x40000400` locates which part of INIT_RAM was touched: offsets near zero suggest a stale heap or BSS pointer; offsets near `0xBBFC` (= `0xF000 - 0x400`) suggest a leftover stack reference (the initial stack and `gd` struct were reserved at the top of INIT_RAM by `board_init_f_alloc_reserve()`).
 
 Run `bdinfo` before poisoning to confirm that `gd`, `sp`, and the malloc arena are all well above `0x4000FFFF`. If any of them appear in the `0x40000xxx` range, relocation did not complete correctly and poisoning would corrupt live data.
 
