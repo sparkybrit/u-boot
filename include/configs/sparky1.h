@@ -19,25 +19,6 @@
 
 #define CFG_SYS_UART_PORT		(0)
 
-/* Configuration for environment
- * Environment is embedded in u-boot in the second sector of the flash
- */
-
-#define LDS_BOARD_TEXT \
-	env/embedded.o(.text);
-
-#define CFG_EXTRA_ENV_SETTINGS		\
-	"netdev=eth0\0"				\
-	"loadaddr=10000\0"			\
-	"u-boot=u-boot.bin\0"			\
-	"load=tftp ${loadaddr) ${u-boot}\0"	\
-	"upd=run load; run prog\0"		\
-	"prog=prot off ffe00000 ffe3ffff;"	\
-	"era ffe00000 ffe3ffff;"		\
-	"cp.b ${loadaddr} ffe00000 ${filesize};"\
-	"save\0"				\
-	""
-
 #define CFG_SYS_CLK			16000000
 
 /*-----------------------------------------------------------------------
