@@ -39,3 +39,22 @@ The following peripherals are supported in U-Boot:
 * XR68C681 DUART channel A (serial console, 115200 8N1)
 * XR68C681 counter/timer (100 Hz system timer)
 * XR68C681 output port (GPIO)
+
+Exception Vector Table
+----------------------
+
+The 68030 VBR (Vector Base Register) is initialised in two stages:
+
+1. **Before relocation** — VBR is implicitly 0x000000 (reset default). The
+   vector table in flash at 0x000000 is used for any exceptions that occur
+   during ``board_init_f``.
+
+2. **After relocation** — ``arch_initr_trap()`` (called from ``board_init_r``
+   via ``initcall_run_r``) calls ``trap_init(CFG_SYS_SDRAM_BASE)``, which
+   writes a fresh vector table directly into RAM at ``0x40000000`` (the base of
+   SDRAM). All 254 vectors are filled with the relocated RAM addresses of
+   ``_exc_handler`` (vectors 2–24, 32–63) or ``_int_handler`` (vectors 25–31,
+   64–255). ``setvbr(0x40000000)`` then points VBR at the new table.
+
+The flash vector table is never copied to RAM; the RAM table is built from
+scratch by ``trap_init()`` in ``arch/m68k/lib/traps.c``.
