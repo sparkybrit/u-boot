@@ -256,7 +256,7 @@ config M68K_QEMU
 
 config MCFTMR
 	bool "Use DMA timer"
-	default y if !M68K_QEMU
-	default n if M68K_QEMU
+	default y if ARCH_COLDFIRE && !M68K_QEMU
+	default n
 
 endmenu
