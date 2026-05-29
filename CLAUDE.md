@@ -220,6 +220,16 @@ common/board_r.c:initcall_run_r()
 - `board_early_init_f`, `board_init`, `board_late_init`, `misc_init_r` are all not configured and are skipped.
 - The XR68C681 serial driver carries `DM_FLAG_PRE_RELOC` so it is bound and probed before relocation, then re-probed in RAM after relocation.
 
+### Exception vector table
+
+The vector table in flash is **never copied to RAM**. Instead, `trap_init()` in `arch/m68k/lib/traps.c` builds a fresh table directly in RAM:
+
+- **Destination:** `CFG_SYS_SDRAM_BASE` = `0x40000000` (base of SDRAM)
+- **Contents:** vectors 2–24 and 32–63 → `_exc_handler`; vectors 25–31 and 64–255 → `_int_handler` (all pointing to their relocated RAM addresses). Vectors 0 (initial SP) and 1 (reset PC) are not written.
+- **VBR set:** `setvbr(0x40000000)` at the end of `trap_init()`, called from `arch_initr_trap()` during `initcall_run_r()` in phase 2.
+
+Before `setvbr` is called, VBR defaults to 0x000000 and the flash vector table handles any early exceptions.
+
 ## Build
 
 ```bash
