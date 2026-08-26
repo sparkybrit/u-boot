@@ -90,28 +90,29 @@ static u8 ide_inb(int dev, int port)
 }
 
 #if IS_ENABLED(CONFIG_SYS_ATA_DATA_8BIT)
+static void ide_input_data(int dev, ulong *sect_buf, int words);
+
 /*
  * Read IDENTIFY DEVICE data through an 8-bit data port.
  *
- * The device sends each ATA word low byte first, and the result is stored as
- * a native-endian 16-bit word - the same layout the 16-bit path produces on a
- * big-endian host. That is what callers expect: ATA puts the first character
- * of each string in bits 15-8 of the word, so storing the word natively is
- * what leaves the model/serial/firmware strings readable in place.
+ * The transfer is the sector-data loop; only the interpretation differs. ATA
+ * puts the first character of each string in bits 15-8 of the word, so
+ * exchanging the bytes of every pair is what leaves the model, serial and
+ * firmware strings readable in place, and the numeric fields holding true ATA
+ * word values for the be16_to_cpu() in ide_ident().
  */
 static void ide_input_swap_data(int dev, ulong *sect_buf, int words)
 {
-	uintptr_t paddr = (ATA_CURR_BASE(dev) + ATA_DATA_REG);
-	u16 *dbuf = (u16 *)sect_buf;
+	u8 *p = (u8 *)sect_buf;
 	int i;
 
-	log_debug("in input swap data base for read is %p\n", (void *)paddr);
+	ide_input_data(dev, sect_buf, words);
 
-	for (i = 2 * words; i > 0; i--) {
-		u8 lo = inb(paddr);
-		u8 hi = inb(paddr);
+	for (i = 2 * words; i > 0; i--, p += 2) {
+		u8 tmp = p[0];
 
-		*dbuf++ = ((u16)hi << 8) | lo;
+		p[0] = p[1];
+		p[1] = tmp;
 	}
 }
 #else
@@ -574,21 +575,15 @@ static int ide_set_8bit_mode(int device)
 	u8 c;
 
 	/*
-	 * INITIALIZE DEVICE PARAMETERS is part of the bring-up sequence
-	 * validated against this hardware. It only sets up CHS translation,
-	 * which is never used here - every transfer below selects LBA in the
-	 * device/head register - so a device that rejects it is not a problem
-	 * and the failure is only logged.
+	 * Deliberately no INITIALIZE DEVICE PARAMETERS here. It sets the
+	 * device's current logical geometry, and this driver has none to give:
+	 * it addresses everything by LBA, and IDENTIFY has not been read yet,
+	 * so nothing is known about the device. CHS translation is never used
+	 * below - every command selects LBA in the device/head register.
 	 */
 	ide_outb(device, ATA_DEV_HD, ATA_LBA | ATA_DEVICE(device));
-	ide_outb(device, ATA_SECT_CNT, 1);
-	ide_outb(device, ATA_COMMAND, ATA_CMD_INIT_DEV_PARAMS);
-	c = ide_wait(device, IDE_TIME_OUT);
-	if (c & (ATA_STAT_ERR | ATA_STAT_FAULT))
-		log_debug("INITIALIZE DEVICE PARAMETERS failed, status %#02x\n",
-			  c);
 
-	/* This one does matter: without it the device drives D8-D15 too */
+	/* Without this the device drives D8-D15 as well as D0-D7 */
 	ide_outb(device, ATA_ERROR_REG, SETFEATURES_8BIT);
 	ide_outb(device, ATA_COMMAND, ATA_CMD_SET_FEATURES);
 	c = ide_wait(device, IDE_TIME_OUT);
