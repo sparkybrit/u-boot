@@ -62,7 +62,11 @@ work as they do not support the full 68030 instruction set.
     make sparky1_defconfig
     make
 
-The build produces ``u-boot.bin`` for programming to flash at address 0x000400.
+The build produces ``u-boot.bin``, which is written to the DS1250Y NVSRAM at
+address 0x000000 — the image begins with the exception vector table, and
+``CONFIG_SYS_MONITOR_BASE`` = 0x400 is where U-Boot sits inside it, not where
+it is loaded. Programming is done in-circuit; see the nvram-programmer
+project.
 
 Hardware Support
 ----------------
