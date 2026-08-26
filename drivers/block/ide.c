@@ -44,6 +44,14 @@ ulong ide_bus_offset[CONFIG_SYS_IDE_MAXBUS] = {
 
 #define IDE_SPIN_UP_TIME_OUT 5000 /* 5 sec spin-up timeout */
 
+/*
+ * SET FEATURES subcommand 0x01, "enable 8-bit PIO data transfer mode": the
+ * device transfers sector data on D0-D7 only. Required by controllers which
+ * bring out just the low byte of the ATA data bus. Not in libata.h because
+ * Linux has no use for it.
+ */
+#define SETFEATURES_8BIT	0x01
+
 static void ide_reset(void)
 {
 	if (IS_ENABLED(CONFIG_IDE_RESET)) {
@@ -81,6 +89,32 @@ static u8 ide_inb(int dev, int port)
 	return val;
 }
 
+#if IS_ENABLED(CONFIG_SYS_ATA_DATA_8BIT)
+/*
+ * Read IDENTIFY DEVICE data through an 8-bit data port.
+ *
+ * The device sends each ATA word low byte first, and the result is stored as
+ * a native-endian 16-bit word - the same layout the 16-bit path produces on a
+ * big-endian host. That is what callers expect: ATA puts the first character
+ * of each string in bits 15-8 of the word, so storing the word natively is
+ * what leaves the model/serial/firmware strings readable in place.
+ */
+static void ide_input_swap_data(int dev, ulong *sect_buf, int words)
+{
+	uintptr_t paddr = (ATA_CURR_BASE(dev) + ATA_DATA_REG);
+	u16 *dbuf = (u16 *)sect_buf;
+	int i;
+
+	log_debug("in input swap data base for read is %p\n", (void *)paddr);
+
+	for (i = 2 * words; i > 0; i--) {
+		u8 lo = inb(paddr);
+		u8 hi = inb(paddr);
+
+		*dbuf++ = ((u16)hi << 8) | lo;
+	}
+}
+#else
 static void ide_input_swap_data(int dev, ulong *sect_buf, int words)
 {
 	uintptr_t paddr = (ATA_CURR_BASE(dev) + ATA_DATA_REG);
@@ -95,6 +129,7 @@ static void ide_input_swap_data(int dev, ulong *sect_buf, int words)
 		*dbuf++ = be16_to_cpu(inw(paddr));
 	}
 }
+#endif
 
 /*
  * Wait until Busy bit is off, or timeout (in ms)
@@ -524,6 +559,56 @@ static void atapi_inquiry(struct blk_desc *desc)
 	desc->lba48 = false;
 }
 
+#if IS_ENABLED(CONFIG_SYS_ATA_DATA_8BIT)
+/**
+ * ide_set_8bit_mode() - Switch a device to 8-bit PIO data transfers
+ *
+ * Must run before any command that moves data through the data register,
+ * IDENTIFY DEVICE included, since the controller can only read the low byte.
+ *
+ * @device: Device number to configure
+ * Return: 0 if OK, -EIO if the device refused
+ */
+static int ide_set_8bit_mode(int device)
+{
+	u8 c;
+
+	/*
+	 * INITIALIZE DEVICE PARAMETERS is part of the bring-up sequence
+	 * validated against this hardware. It only sets up CHS translation,
+	 * which is never used here - every transfer below selects LBA in the
+	 * device/head register - so a device that rejects it is not a problem
+	 * and the failure is only logged.
+	 */
+	ide_outb(device, ATA_DEV_HD, ATA_LBA | ATA_DEVICE(device));
+	ide_outb(device, ATA_SECT_CNT, 1);
+	ide_outb(device, ATA_COMMAND, ATA_CMD_INIT_DEV_PARAMS);
+	c = ide_wait(device, IDE_TIME_OUT);
+	if (c & (ATA_STAT_ERR | ATA_STAT_FAULT))
+		log_debug("INITIALIZE DEVICE PARAMETERS failed, status %#02x\n",
+			  c);
+
+	/* This one does matter: without it the device drives D8-D15 too */
+	ide_outb(device, ATA_ERROR_REG, SETFEATURES_8BIT);
+	ide_outb(device, ATA_COMMAND, ATA_CMD_SET_FEATURES);
+	c = ide_wait(device, IDE_TIME_OUT);
+	if (c & (ATA_STAT_ERR | ATA_STAT_FAULT)) {
+		u8 err = ide_inb(device, ATA_ERROR_REG);
+
+		printf("8-bit transfer mode rejected (status %#02x, error %#02x)%s\n",
+		       c, err, err & ATA_ABORTED ? " - command aborted" : "");
+		return -EIO;
+	}
+
+	return 0;
+}
+#else
+static inline int ide_set_8bit_mode(int device)
+{
+	return 0;
+}
+#endif
+
 /**
  * ide_ident() - Identify an IDE device
  *
@@ -548,6 +633,11 @@ static int ide_ident(int device, struct blk_desc *desc)
 	/* Select device
 	 */
 	ide_outb(device, ATA_DEV_HD, ATA_LBA | ATA_DEVICE(device));
+
+	/* Has to happen before IDENTIFY, which itself uses the data port */
+	if (ide_set_8bit_mode(device))
+		return -EIO;
+
 	if (IS_ENABLED(CONFIG_ATAPI))
 		tries = 2;
 
@@ -682,6 +772,21 @@ static int ide_init_one(int bus)
 	mdelay(100);
 	ide_outb(dev, ATA_DEV_HD, ATA_LBA | ATA_DEVICE(dev));
 	mdelay(100);
+
+	/*
+	 * An empty socket leaves the bus floating, which reads back as all
+	 * ones - not a status any device can report, since BSY and DRDY are
+	 * mutually exclusive. Bail out now: otherwise the poll below runs the
+	 * full ATA_RESET_TIME before giving up, which is a minutes-long stall
+	 * at boot on a board with a coarse delay timer.
+	 */
+	c = ide_inb(dev, ATA_STATUS);
+	if (c == 0xff) {
+		puts("not available  ");
+		log_debug("Status = 0xFF, no device\n");
+		return -ENODEV;
+	}
+
 	i = 0;
 	do {
 		mdelay(10);
@@ -711,6 +816,42 @@ static int ide_init_one(int bus)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_SYS_ATA_DATA_8BIT)
+/*
+ * Sector data through an 8-bit data port. ATA streams the sector a byte at a
+ * time in its natural order, so the buffer needs no swapping on either
+ * endianness - and, unlike the 16-bit path, it need not be 2-byte aligned.
+ *
+ * "words" counts 32-bit words, as it does for the 16-bit path.
+ */
+static void ide_output_data(int dev, const ulong *sect_buf, int words)
+{
+	uintptr_t paddr = (ATA_CURR_BASE(dev) + ATA_DATA_REG);
+	const u8 *dbuf = (const u8 *)sect_buf;
+
+	while (words--) {
+		outb(*dbuf++, paddr);
+		outb(*dbuf++, paddr);
+		outb(*dbuf++, paddr);
+		outb(*dbuf++, paddr);
+	}
+}
+
+static void ide_input_data(int dev, ulong *sect_buf, int words)
+{
+	uintptr_t paddr = (ATA_CURR_BASE(dev) + ATA_DATA_REG);
+	u8 *dbuf = (u8 *)sect_buf;
+
+	log_debug("in input data base for read is %p\n", (void *)paddr);
+
+	while (words--) {
+		*dbuf++ = inb(paddr);
+		*dbuf++ = inb(paddr);
+		*dbuf++ = inb(paddr);
+		*dbuf++ = inb(paddr);
+	}
+}
+#else
 static void ide_output_data(int dev, const ulong *sect_buf, int words)
 {
 	uintptr_t paddr = (ATA_CURR_BASE(dev) + ATA_DATA_REG);
@@ -741,6 +882,7 @@ static void ide_input_data(int dev, ulong *sect_buf, int words)
 		*dbuf++ = le16_to_cpu(inw(paddr));
 	}
 }
+#endif
 
 static ulong ide_read(struct udevice *dev, lbaint_t blknr, lbaint_t blkcnt,
 		      void *buffer)
@@ -1065,9 +1207,15 @@ static int ide_probe(struct udevice *udev)
 	return 0;
 }
 
+static const struct udevice_id ide_ids[] = {
+	{ .compatible = "u-boot,ide" },
+	{ }
+};
+
 U_BOOT_DRIVER(ide) = {
 	.name		= "ide",
 	.id		= UCLASS_IDE,
+	.of_match	= ide_ids,
 	.probe		= ide_probe,
 };
 

@@ -183,6 +183,19 @@ config SYS_ATA_STRIDE
 	  appear at consecutive bytes. If the value 2 two, that might indicate
 	  a 16-bit register space.
 
+config SYS_ATA_DATA_8BIT
+	bool "8-bit data port"
+	depends on !ATAPI
+	help
+	  Say Y if only D0-D7 of the ATA data bus is wired up, as on boards
+	  which hang the interface off an 8-bit port. Sector data is then
+	  transferred a byte at a time instead of a word at a time, and the
+	  driver issues SET FEATURES subcommand 0x01 during init so that the
+	  device transfers on D0-D7 only. A device which rejects that
+	  subcommand cannot be used, and is reported at boot.
+
+	  Say N for normal 16-bit hardware, which runs at twice the speed.
+
 config SYS_ATA_DATA_OFFSET
 	hex "Offset of the data register"
 	default 0x0
