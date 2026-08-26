@@ -346,6 +346,49 @@ make CROSS_COMPILE=m68k-linux-gnu- -j$(nproc)
 
 The 68030 requires `-mcpu=68030` (not `-mcpu=5307` or any ColdFire flag). Verify the cross-compiler supports classic m68k ISA — ColdFire-only compilers will not work.
 
+## Programming the board
+
+The boot store is a Dallas DS1250Y NVSRAM at `0x00000000`. It is not removed
+and flashed in a programmer — it stays soldered and is written **in-circuit**
+by the Teensy++ 2.0 in `../nvram-programmer/`, which requests the 68030 bus via
+`/BR`/`/BGACK`, DMA-writes the NVRAM, reads it back to verify, releases the
+bus and then pulses `/RESET`.
+
+```bash
+cd ../nvram-programmer && ./nvram_write ~/Projects/u-boot/u-boot.bin
+```
+
+Success prints `Done.` then `Verified.` — the read-back matched, so the
+contents are confirmed, not merely written. The board reboots into the new
+image on its own; no manual reset.
+
+**`u-boot.bin` is written at NVRAM address 0, not 0x400.** The image *starts*
+with the exception vector table: offset 0x004 holds `0x00000400`, which is
+`_start`, and 0x008 onward hold `_exc_handler`. `CONFIG_SYS_MONITOR_BASE`
+= 0x400 is where U-Boot sits *inside* the image, not where the image is
+loaded. The programmer always writes from address 0, which is correct.
+The whole image must fit the 512 KB device (currently ~283 KB).
+
+### Gotchas
+
+- **The Teensy is powered from the SBC rail.** If `/dev/ttyACM0` has vanished,
+  the board is off — that is the first thing to check when `nvram_write`
+  reports `No such file or directory`.
+- **The serial console is `/dev/ttyUSB0`** (an FTDI TTL232R), 115200 8N1.
+  It is a different device from the programmer, so flashing and console
+  capture can run at the same time.
+- **Only one process can hold the console.** minicom and any script fight over
+  it; `fuser -v /dev/ttyUSB0` names the holder. With minicom closed the board
+  can be driven programmatically — send a command, wait for the `=> ` prompt,
+  read the reply — which is far quicker than copying dumps out of a terminal
+  by hand, and lets output be diffed and decoded directly.
+- **minicom with line wrap off silently truncates at column 80.** The `Ser#:`
+  field of the IDE probe line starts exactly at column 80, so with wrapping
+  disabled only the *last* character of the serial number survives, which
+  looks exactly like corrupted IDENTIFY data. Turn wrapping on before reading
+  anything into a diagnosis.
+- To reboot without reflashing, send U-Boot's own `reset` command.
+
 ## Testing
 
 ### Cache verification
