@@ -59,6 +59,9 @@ CONFIG_SYS_ATA_DATA_OFFSET=0x0
 CONFIG_SYS_ATA_REG_OFFSET=0x0
 CONFIG_SYS_ATA_ALT_OFFSET=0x0
 CONFIG_SYS_ATA_DATA_8BIT=y
+# Some cards report a bogus LBA28 capacity in words 60/61 and the real one
+# in the LBA48 words 100-103; without this U-Boot only ever reads 60/61.
+CONFIG_LBA48=y
 # Partitions and filesystems on the CF
 CONFIG_DOS_PARTITION=y
 CONFIG_CMD_PART=y
