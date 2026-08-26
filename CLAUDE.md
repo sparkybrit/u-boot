@@ -151,9 +151,11 @@ software-controlled either, so `CONFIG_IDE_RESET` stays off and there is no
 
 Limited by the 100 Hz system timer, not the bus. `ide_wait()` polls with
 `udelay(100)`, and the finest tick available is 10 ms, so any transfer that has
-to wait at all waits a whole tick — reads land around 50 KB/s. Going faster
-means a finer time source (the XR68C681 counter registers can be read live),
-not a faster bus. Sixteen-bit mode is wired up in `cfmanager` but commented
+to wait at all waits a whole tick. Measured on a SanDisk SDCFX-008G: **~50 KB/s
+reading** (a 4 KB file via `load` takes ~1.4 s once directory and FAT lookups
+are counted) and **~18 KB/s writing** (2 MB of filesystem metadata in 112 s).
+Going faster means a finer time source — the XR68C681 counter registers can be
+read live — not a faster bus. Sixteen-bit mode is wired up in `cfmanager` but commented
 out; enabling it needs the PLD change, CF D8–D15 wired to D23–D16, **and**
 clearing `CONFIG_SYS_ATA_DATA_8BIT`.
 
@@ -511,11 +513,72 @@ card has no partition table at all this check says nothing; fall back to
 running the hardware project's `tests/cf_test/` and reading a sector it
 wrote.
 
-The same signal shows up in `ide info` at boot: a model string reading
-`aSDnsi kDCSBF2-18` instead of `SanDisk SDCFB-128` is transposed pairs in
-`ide_input_swap_data()`. Note that the two paths are independent — IDENTIFY
-is deliberately swapped and sector data deliberately is not — so one can be
-wrong while the other is right. See the byte-ordering notes above.
+#### A scrambled model string does not mean a driver bug
+
+The obvious reading of a mangled `ide info` line is transposed byte pairs in
+`ide_input_swap_data()`. **That reading cost most of a day and was wrong.** A
+counterfeit SanDisk Extreme Pro 64 GB reported model `FSPC-X6SG0 4`, a
+capacity of 117440519 sectors against a true 125059072, and its LBA28 capacity
+words one slot early at words 59/60 — while sector reads from the same card
+were byte-perfect. Neither a byte-ordering change, nor removing INITIALIZE
+DEVICE PARAMETERS, nor enabling LBA48, nor padding every port read with ~1 µs
+of NOPs altered a single byte of its IDENTIFY response. The card's firmware
+was simply lying.
+
+Two tells, in hindsight: a genuine SanDisk puts the vendor in the model string
+(`SanDisk SDCFX-008G`), and the counterfeit's bare `SDCFXPS-064G` did not; and
+its CF-specific words 7/8 held the correct total while words 60/61 did not.
+
+**So do not debug the driver from IDENTIFY output.** In order of cost:
+
+1. **Try a second card.** This is the fastest discriminator by a wide margin
+   and needs one power cycle. A genuine card puts every landmark in its
+   standard place — words 54–56 mirroring words 1/3/6, word 64 = `0x0003`,
+   words 65–68 = `0x0078`, and LBA28, LBA48 and words 7/8 all agreeing.
+2. **Check the sector path separately**, against a sector the board did not
+   write. IDENTIFY and sector data are deliberately asymmetric — one is
+   byte-swapped, the other is not — so one can be wrong while the other is
+   right, and a fault in either is invisible to a round-trip through this
+   driver alone.
+3. Only then suspect `ide_input_swap_data()`.
+
+#### Formatting a card from the SBC
+
+U-Boot has no `mkfs`, and this defconfig has no `mbr`, `gpt`, `loadb` or FAT
+write support either. A card can still be formatted entirely from the board,
+because a fresh FAT32 volume is almost all zeros — for an 8 GB card at 32 KB
+clusters only **eight** sectors carry data:
+
+| disk LBA | contents |
+|----------|----------|
+| 0 | MBR |
+| 2048 / 2049 | boot sector / FSInfo |
+| 2054 / 2055 | their backups |
+| 2112 / 4032 | first sector of FAT1 / FAT2 (`F8FFFF0F FFFFFF0F F8FFFF0F`) |
+| 5952 | root directory cluster (volume label) |
+
+Everything from LBA 2048 to 6015 is zeros. So:
+
+1. On the host, generate the structures with the real tools rather than
+   computing FAT arithmetic by hand — `sfdisk` on a sparse full-disk image for
+   the MBR, `mkfs.vfat -F 32 -s 64` on a sparse partition-sized image for the
+   filesystem. Force the cluster size: left to itself `mkfs.vfat` picks 4 KB
+   clusters, which makes each FAT 15256 sectors and the write take five
+   minutes instead of forty seconds.
+2. Zero a 256 KB buffer with `mw.l <buf> 0 0x10000` and blast it over the
+   metadata region with a handful of `ide write <buf> <lba> 0x200`.
+3. Build each content sector in RAM — `mw.l <buf> 0 0x80`, then one `mw.l` per
+   non-zero longword (about 130 in total across all eight) — and `ide write`
+   it to its LBA. Read the source longwords **big-endian** so the values
+   reproduce the on-disk byte order through m68k's `mw.l`.
+
+Keep the buffer well below `relocaddr` (check `bdinfo`; it is around
+`0x403b8000`), so `0x40100000` is safe. The whole run is ~157 commands and
+takes about two minutes, dominated by the metadata zeroing.
+
+This is also the only real test of the **write** path: format from the SBC,
+then confirm Linux mounts the result read-write and can allocate clusters in
+it. A round-trip through this driver alone cannot detect a symmetric fault.
 
 ### INIT_RAM relocation verification
 
