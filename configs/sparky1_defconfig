@@ -43,3 +43,24 @@ CONFIG_MC68681_TIMER=y
 # GPIO
 CONFIG_DM_GPIO=y
 CONFIG_MC68681_GPIO=y
+# IDE / CompactFlash
+# CF in True IDE mode at 0xC0000000: 8 byte-wide registers selected by A2-A0
+# on an 8-bit port (D31-D24).  Master only - there is no slave select, and
+# CS1 (alternate status / device control) is not decoded, which is fine as
+# long as CONFIG_ATAPI stays off since that is its only user.
+CONFIG_BOARD_LATE_INIT=y
+CONFIG_CMD_IDE=y
+CONFIG_SYS_IDE_MAXBUS=0x1
+CONFIG_SYS_IDE_MAXDEVICE=0x1
+CONFIG_SYS_ATA_BASE_ADDR=0xc0000000
+CONFIG_SYS_ATA_IDE0_OFFSET=0x0
+CONFIG_SYS_ATA_STRIDE=0x1
+CONFIG_SYS_ATA_DATA_OFFSET=0x0
+CONFIG_SYS_ATA_REG_OFFSET=0x0
+CONFIG_SYS_ATA_ALT_OFFSET=0x0
+CONFIG_SYS_ATA_DATA_8BIT=y
+# Partitions and filesystems on the CF
+CONFIG_DOS_PARTITION=y
+CONFIG_CMD_PART=y
+CONFIG_CMD_FAT=y
+CONFIG_CMD_FS_GENERIC=y

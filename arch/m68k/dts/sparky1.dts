@@ -45,6 +45,21 @@
 		status = "okay";
 	};
 
+    /*
+     * CompactFlash in True IDE mode: 8 byte-wide registers selected by
+     * A2-A0, on an 8-bit port at D31-D24. /DISKCS and the ATA strobes come
+     * from plds/cfmanager in the sparky1 hardware project.
+     *
+     * The generic IDE driver takes its addressing from CONFIG_SYS_ATA_*,
+     * so this node exists to bind the driver and to record the hardware;
+     * reg is not read back by the driver.
+     */
+    ide0: ide@c0000000 {
+        compatible = "u-boot,ide";
+        reg = <0xc0000000 0x8>;
+        status = "okay";
+    };
+
     gpio1: gpio1@80000000 {
         compatible = "motorola,mc68681_gpio";
         reg = <0x80000000 0x10>;
