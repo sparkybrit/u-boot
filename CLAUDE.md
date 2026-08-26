@@ -38,12 +38,20 @@ To incrementally rebase `sparky` onto the new master, rebase through each stable
 - `include/dm/platform_data/mc68681.h` — shared DM platform data struct (`mc68681_plat`)
 - Compatible strings: `exar,xr68c681` (serial), `exar,xr68c681_timer` (timer), `motorola,mc68681_gpio` (GPIO)
 
+### CompactFlash / IDE
+- `arch/m68k/dts/sparky1.dts` — `ide@c0000000` node, `compatible = "u-boot,ide"`
+- `board/sparky/sparky1/sparky1.c` — `board_late_init()` probes the controller
+- Uses upstream `drivers/block/ide.c` in 8-bit mode; see [CompactFlash / IDE](#compactflash--ide--key-implementation-notes)
+
 ### Modified upstream files
 - `arch/m68k/include/asm/uart.h` → moved to `arch/m68k/include/asm/coldfire/uart.h` (restored to upstream ColdFire content; `serial_mcf.c` updated to match)
 - `arch/m68k/lib/cache.c`, `interrupts.c` — extended for 68030 (non-ColdFire) builds
 - `arch/m68k/lib/Makefile` — split ARCH_COLDFIRE bundle; common files now `obj-y`, ColdFire-only (`bdinfo.o`) stays conditional
 - `arch/m68k/Kconfig` — added `MC680x0`, `MC68030`, `TARGET_SPARKY1` alongside upstream's QEMU m68k additions
 - `lib/time.c`, `drivers/timer/timer-uclass.c` — minor fixes
+- `drivers/block/ide.c`, `drivers/block/Kconfig` — added `CONFIG_SYS_ATA_DATA_8BIT`
+  (8-bit data port), a `u-boot,ide` devicetree binding, and a floating-bus
+  no-device check. **This file conflicts on rebase** — see below.
 
 ## XR68C681 DUART — key implementation notes
 
@@ -74,6 +82,89 @@ ACR (Auxiliary Control Register) at offset 0x04 is **write-only** — reads at t
 
 The counter/timer runs at 100 Hz: N=0x0480 (1152), f = (3.6864 MHz / 16) / (2 × 1152) = 100 Hz. The interrupt is cleared by reading `uopc` (0x0F). In timer mode, the "stop counter" command does **not** actually halt the counter — it only clears ISR[3]. The `clock-frequency` DTS property must be set to `100`.
 
+## CompactFlash / IDE — key implementation notes
+
+A CompactFlash card in True IDE mode hangs off `/DISKCS` at `0xC0000000`. It is
+driven by upstream's generic `drivers/block/ide.c`, which needed three changes
+to cope with the wiring.
+
+### The wiring
+
+| Property | Value | Kconfig |
+|----------|-------|---------|
+| Base address | `0xC0000000` | `CONFIG_SYS_ATA_BASE_ADDR` |
+| Registers | 8, byte-wide, selected by A2–A0 | `CONFIG_SYS_ATA_STRIDE=0x1` |
+| Data port | offset 0, **8 bits** on D31–D24 | `CONFIG_SYS_ATA_DATA_8BIT=y` |
+| Devices | one, master only | `CONFIG_SYS_IDE_MAXDEVICE=0x1` |
+
+Timing (`/IORD`, `/IOWR`, wait states, `/DSACK0`) comes from the `cfmanager`
+GAL in the sparky1 hardware project, which stretches every CF cycle to ~437 ns
+for ATA PIO mode 0. The 400 ns ATA requires between the last data byte and the
+next status read is therefore free — no extra delay in the driver.
+
+### 8-bit data port
+
+Only the low byte of the ATA data bus is wired, so `CONFIG_SYS_ATA_DATA_8BIT`
+switches `ide_input_data()`, `ide_output_data()` and `ide_input_swap_data()` to
+byte transfers, and makes `ide_ident()` call `ide_set_8bit_mode()` before
+IDENTIFY — which issues `INITIALIZE DEVICE PARAMETERS` (0x91, tolerated if it
+fails; it only affects CHS translation, never used here) and then
+`SET FEATURES` (0xEF) with subcommand `0x01`, "enable 8-bit PIO data transfer".
+That last one matters: without it the card also drives D8–D15.
+
+`ide_set_8bit_mode()` sits in `ide_ident()` rather than `ide_init_one()`
+because 8-bit mode is a **per-device** setting, and `ide_init_one()` runs once
+per bus.
+
+### Byte ordering — the part that is easy to get wrong
+
+The two data paths need *different* handling, and the reason is not symmetric:
+
+- **Sector data** (`ide_input_data`/`ide_output_data`) — the card streams the
+  sector a byte at a time in its natural order, so the buffer is filled
+  byte-for-byte with no swapping on either endianness. It also need not be
+  2-byte aligned, unlike the 16-bit path.
+
+- **IDENTIFY data** (`ide_input_swap_data`) — stored as **native-endian 16-bit
+  words**, i.e. `word = (hi << 8) | lo`. ATA puts the first character of each
+  string in bits 15–8, so on big-endian m68k a native word store is exactly
+  what leaves `iop.model` / `serial_no` / `fw_rev` readable in place, and
+  leaves `iop.config`, `lba_capacity[]` and `command_set_2` holding true ATA
+  word values (`be16_to_cpu()` in `ide_ident()` is then a no-op).
+
+This matches the reference implementation in the hardware project's
+`tests/cf_test/cf_test.c` (`put_ata_str()`, `word_at()`, `dword_at()`), and the
+`hd_driveid_t` field offsets line up with the ATA word numbers it uses:
+`config` @ 0, `serial_no` @ 20, `fw_rev` @ 46, `model` @ 54, `lba_capacity`
+@ 120, `command_set_2` @ 166.
+
+### CS1 is not decoded — keep CONFIG_ATAPI off
+
+Only A2–A0 reach the card, so the alternate status and device control
+registers are unreachable. `ATA_DEV_CTL` has exactly one user in the driver,
+`atapi_wait_mask()`, which is compiled out unless `CONFIG_ATAPI` is set —
+hence `CONFIG_SYS_ATA_DATA_8BIT` carries `depends on !ATAPI`. `RESET–` is not
+software-controlled either, so `CONFIG_IDE_RESET` stays off and there is no
+`ide_set_reset()`.
+
+### Throughput
+
+Limited by the 100 Hz system timer, not the bus. `ide_wait()` polls with
+`udelay(100)`, and the finest tick available is 10 ms, so any transfer that has
+to wait at all waits a whole tick — reads land around 50 KB/s. Going faster
+means a finer time source (the XR68C681 counter registers can be read live),
+not a faster bus. Sixteen-bit mode is wired up in `cfmanager` but commented
+out; enabling it needs the PLD change, CF D8–D15 wired to D23–D16, **and**
+clearing `CONFIG_SYS_ATA_DATA_8BIT`.
+
+### Rebase note
+
+`drivers/block/ide.c` is now a modified upstream file and will conflict when
+rebasing through release tags. The changes are three `#if
+IS_ENABLED(CONFIG_SYS_ATA_DATA_8BIT)` blocks around the data-path functions,
+the `ide_set_8bit_mode()` helper and its call in `ide_ident()`, the `0xFF`
+no-device check in `ide_init_one()`, and `.of_match` on `U_BOOT_DRIVER(ide)`.
+
 ## Repository layout (m68k-relevant paths)
 
 | Path | Purpose |
@@ -90,6 +181,8 @@ The counter/timer runs at 100 Hz: N=0x0480 (1152), f = (3.6864 MHz / 16) / (2 ×
 | `drivers/serial/xr68c681_serial.c` | XR68C681 serial driver |
 | `drivers/timer/xr68c681_timer.c` | XR68C681 timer driver |
 | `drivers/gpio/mc68681_gpio.c` | XR68C681 GPIO (output port) driver |
+| `drivers/block/ide.c` | Generic IDE driver — extended for 8-bit data ports |
+| `include/ata.h` | ATA register offsets, computed from `CONFIG_SYS_ATA_*` |
 | `drivers/serial/serial_mcf.c` | ColdFire serial driver (uses `<asm/coldfire/uart.h>`) |
 | `doc/board/sparky/index.rst` | Sphinx toctree entry for sparky board docs |
 | `doc/board/sparky/sparky1.rst` | Hardware overview, build instructions, peripheral support |
@@ -212,12 +305,21 @@ common/board_r.c:initcall_run_r()
   │         ├─ ivr = 0x40
   │         ├─ arch/m68k/lib/interrupts.c:irq_install_handler()   register timer_interrupt_handler
   │         └─ uimr = 0x08                      enable counter/timer interrupt
+  ├─ board/sparky/sparky1/sparky1.c:board_late_init()
+  │    └─ uclass_first_device_err(UCLASS_IDE) → drivers/block/ide.c:ide_probe()
+  │         ├─ ide_init_one(0)                 select master, 0xFF check, poll BSY
+  │         ├─ ide_ident(0)
+  │         │    ├─ ide_set_8bit_mode()        INIT_DEV_PARAMS, then SET FEATURES 0x01
+  │         │    ├─ ATA_CMD_ID_ATA             IDENTIFY DEVICE
+  │         │    └─ ide_input_swap_data()      512 bytes, one at a time
+  │         └─ blk_create_devicef("ide_blk")   → "ide 0" block device
   └─ common/board_r.c:run_main_loop() → common/main.c:main_loop()
 ```
 
 **Notes:**
 - `TIMER_EARLY` is not set — the timer is not available during `board_init_f`. Any `get_timer()` call before `timer_init` in phase 2 would trigger a lazy `dm_timer_init()`, which would panic as the timer device isn't probed yet pre-relocation.
-- `board_early_init_f`, `board_init`, `board_late_init`, `misc_init_r` are all not configured and are skipped.
+- `board_early_init_f`, `board_init` and `misc_init_r` are not configured and are skipped. `board_late_init` **is** configured, and exists solely to probe the CompactFlash.
+- **The CompactFlash must not be autoprobed.** `dm_autoprobe()` runs inside `initr_dm()`, long before `interrupt_init()` and the M68K `timer_init()` further down `init_sequence_r[]`. The XR68C681 tick counter is only advanced by the timer's 100 Hz interrupt handler, so a controller probed at `initr_dm()` time reaches `ide_probe()`'s `mdelay(100)` with the counter frozen at zero and `__udelay()` spins forever. Probing from `board_late_init()` is what avoids that; do not add `DM_FLAG_PROBE_AFTER_BIND` to the IDE driver.
 - The XR68C681 serial driver carries `DM_FLAG_PRE_RELOC` so it is bound and probed before relocation, then re-probed in RAM after relocation.
 
 ### Exception vector table
@@ -297,6 +399,51 @@ time cmp.l 0x40100000 0x40110000 0x8000
 ```
 
 The scratch addresses (0x40100000 / 0x40110000) sit in the middle of the 4 MB SDRAM region (0x40000000–0x403FFFFF), well below where U-Boot relocates to near the top. If both timed results round to zero, increase the count to `0x40000` (1 MB). The D-cache speedup is most visible on the `cmp` (read-heavy) operation; `mw` speedup is smaller because the 68030 D-cache is write-through.
+
+### CompactFlash verification
+
+The controller is probed during `board_late_init()`, so a card present at reset
+is reported in the boot log:
+
+```
+Bus 0: OK
+  Device 0: Model: SanDisk SDCFB-128 Firm: HDX 4.02 Ser#: ...
+            Type: Hard Disk
+            Capacity: 122.5 MB = 0.1 GB (250880 x 512)
+```
+
+`Bus 0: not available` means the status register read back `0xFF` — an empty
+socket, or `/DISKCS` not reaching the card. `8-bit transfer mode rejected`
+means the card refused `SET FEATURES 0x01`; that card cannot be used on this
+board without going to 16-bit mode in `cfmanager`.
+
+Then, at the prompt:
+
+```
+ide info                          # re-report what was found
+part list ide 0                   # partition table
+ls ide 0:1 /                      # FAT directory listing
+load ide 0:1 0x40200000 /file     # read a file into SDRAM
+```
+
+**Read/write integrity** — `ide read`/`ide write` take block counts in hex.
+This round-trips 8 sectors through a scratch area of SDRAM well below the
+relocation address, and **overwrites LBA 0x1000 on the card**:
+
+```
+# fill a buffer, write it out, read it back to a second buffer, compare
+mw.l 0x40100000 0xdeadbeef 0x400
+ide write 0x40100000 0x1000 8
+mw.l 0x40110000 0x00000000 0x400
+ide read  0x40110000 0x1000 8
+cmp.l 0x40100000 0x40110000 0x400
+# "Total of 1024 longwords were the same" = the data path is clean both ways
+```
+
+If `cmp` reports mismatches at every odd longword, or the model string in
+`ide info` reads as `aSDnsi kDCSBF2-18`, the byte ordering is wrong — check
+`ide_input_swap_data()` against the notes above rather than "fixing" the
+buffer.
 
 ### INIT_RAM relocation verification
 
