@@ -426,24 +426,96 @@ ls ide 0:1 /                      # FAT directory listing
 load ide 0:1 0x40200000 /file     # read a file into SDRAM
 ```
 
-**Read/write integrity** — `ide read`/`ide write` take block counts in hex.
-This round-trips 8 sectors through a scratch area of SDRAM well below the
-relocation address, and **overwrites LBA 0x1000 on the card**:
+#### Read/write integrity
+
+`ide read` and `ide write` take **all three arguments in hex** — address,
+block number and block count — and operate on the current device, which
+`ide device` selects (it defaults to 0).
+
+    ide read  addr blk# cnt
+    ide write addr blk# cnt
+
+The tests below use two 4 KB buffers at `0x40100000` and `0x40110000`. Those
+sit in the middle of SDRAM (`0x40000000`–`0x403FFFFF`), well above INIT_RAM
+and well below where U-Boot relocates to, so nothing live is at risk. Sizes
+line up as: 8 sectors × 512 B = 4096 B = `0x1000` bytes = `0x400` longwords,
+which is the count `mw.l` and `cmp.l` take.
+
+**These tests overwrite the card.** LBA `0x1000` is used throughout — far
+enough in to miss the partition table, but if the card holds anything you
+care about, pick an LBA past the end of the last partition instead.
+
+Single sector first, since a fault there is easier to read than one buried in
+a multi-sector burst:
 
 ```
-# fill a buffer, write it out, read it back to a second buffer, compare
+ide device 0
+mw.l 0x40100000 0xdeadbeef 0x80     # 0x80 longwords = 512 B = one sector
+mw.l 0x40110000 0x00000000 0x80     # clear dest: a failed read must not pass
+ide write 0x40100000 0x1000 0x1
+ide read  0x40110000 0x1000 0x1
+cmp.l 0x40100000 0x40110000 0x80
+```
+
+Then 8 sectors in one command. This is worth doing separately: the card
+re-asserts DRQ for each sector without being re-commanded, so it exercises
+the inter-sector turnaround that the single-sector path never reaches.
+
+```
 mw.l 0x40100000 0xdeadbeef 0x400
-ide write 0x40100000 0x1000 8
 mw.l 0x40110000 0x00000000 0x400
-ide read  0x40110000 0x1000 8
+ide write 0x40100000 0x1000 0x8
+ide read  0x40110000 0x1000 0x8
 cmp.l 0x40100000 0x40110000 0x400
-# "Total of 1024 longwords were the same" = the data path is clean both ways
 ```
 
-If `cmp` reports mismatches at every odd longword, or the model string in
-`ide info` reads as `aSDnsi kDCSBF2-18`, the byte ordering is wrong — check
-`ide_input_swap_data()` against the notes above rather than "fixing" the
-buffer.
+A pass prints `Total of 1024 word(s) were the same` — `cmp` calls a `.l`
+object a "word" regardless of the suffix, so that is 1024 longwords, not
+1024 16-bit words. A failure names both addresses and both values:
+
+```
+word at 0x40100000 (0xdeadbeef) != word at 0x40110000 (0x00000000)
+```
+
+`0xdeadbeef` is a poor pattern for spotting a sector landing at the wrong
+offset, since every longword is identical. For a non-repeating pattern,
+copy 4 KB of U-Boot's own image out of NVRAM instead of filling a constant —
+it is varied, read-only and always present:
+
+```
+cp.l 0x00001000 0x40100000 0x400
+mw.l 0x40110000 0x00000000 0x400
+ide write 0x40100000 0x1000 0x8
+ide read  0x40110000 0x1000 0x8
+cmp.l 0x40100000 0x40110000 0x400
+```
+
+**What a round-trip cannot catch.** Writing and reading through the same
+driver hides any fault that is symmetric. If `ide_output_data()` and
+`ide_input_data()` both transposed byte pairs, every `cmp` above would still
+pass while every sector on the card was scrambled for anything else that
+reads it. Confirming the ordering needs data this board did not write.
+
+The cheapest source is a card partitioned or formatted on a PC: LBA 0 ends
+with the boot signature `0x55 0xAA` at offset `0x1FE`.
+
+```
+ide read 0x40100000 0x0 0x1
+md.w 0x401001fe 1
+```
+
+On big-endian m68k the byte at the lower address is the high half, so a
+correct data path shows `0x55aa`. `0xaa55` means every byte pair is
+transposed — fix `ide_input_data()`, do not "correct" it downstream. If the
+card has no partition table at all this check says nothing; fall back to
+running the hardware project's `tests/cf_test/` and reading a sector it
+wrote.
+
+The same signal shows up in `ide info` at boot: a model string reading
+`aSDnsi kDCSBF2-18` instead of `SanDisk SDCFB-128` is transposed pairs in
+`ide_input_swap_data()`. Note that the two paths are independent — IDENTIFY
+is deliberately swapped and sector data deliberately is not — so one can be
+wrong while the other is right. See the byte-ordering notes above.
 
 ### INIT_RAM relocation verification
 
@@ -469,7 +541,8 @@ printenv
 dm tree
 md.l 0x40000400 4
 
-# Compare — "Total of 16128 longwords were the same" means INIT_RAM is clean
+# Compare — "Total of 16128 word(s) were the same" means INIT_RAM is clean
+# (cmp calls a .l object a "word"; that is 16128 longwords)
 # Any reported address means something still touched INIT_RAM after relocation
 cmp.l 0x40000400 0x40020400 0x3f00
 ```
