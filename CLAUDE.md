@@ -42,14 +42,18 @@ git diff --name-only v2026.04 v2026.07 | sort > /tmp/upstream
 comm -12 /tmp/yours /tmp/upstream
 ```
 
-For the v2026.04 → v2026.07 hop that is 11 files out of 5808 upstream
-changed, and every one is a registration-list collision — upstream added an
-entry, you added an entry, keep both:
+For the v2026.04 → v2026.07 hop that is 9 files out of 5808 upstream changed,
+and every one is a registration-list collision — upstream added an entry, you
+added an entry, keep both:
 
 `arch/m68k/Kconfig`, `arch/m68k/lib/Makefile`, `drivers/block/Kconfig`,
 `drivers/serial/{Kconfig,Makefile}`, `drivers/gpio/{Kconfig,Makefile}`,
-`drivers/timer/Kconfig`, `doc/board/index.rst`, and `cmd/mmc.c` +
-`drivers/mmc/mmc.c` (see below).
+`drivers/timer/Kconfig`, `doc/board/index.rst`.
+
+If a file shows up in that intersection and has nothing to do with sparky1,
+suspect a leftover rather than a conflict to resolve. Two MMC files were in
+this list until they were traced back to a revert that had not fully landed —
+one of them referenced a symbol that does not exist anywhere in the tree.
 
 `drivers/block/ide.c` is a modified upstream file and *will* conflict on some
 future hop — see the rebase note in the CompactFlash section for exactly what
