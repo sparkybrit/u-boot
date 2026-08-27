@@ -4,16 +4,62 @@ This is a fork of U-Boot (currently rebased to v2026.04) adding support for the 
 
 ## Branch layout
 
-All custom work is on the `sparky` branch. `master` tracks upstream (`https://github.com/u-boot/u-boot.git`). To update master from upstream:
+All custom work is on the `sparky` branch — currently ~29 commits on top of an
+upstream release. `master` is a pristine mirror of upstream
+(`https://github.com/u-boot/u-boot.git`) with none of your changes on it, kept
+only as a local reference. **Merging work into `master` would break
+`git merge upstream/master`; `sparky` is the branch to merge feature branches
+into.**
+
+### Rebasing onto a new upstream release
+
+Rebase onto **tags**, not onto `master`. A tag is a fixed, reproducible base;
+`master`'s tip moves mid-cycle. Updating `master` is optional housekeeping and
+is *not* a prerequisite — what matters is having the tags:
 
 ```bash
-git checkout master
-git fetch upstream
-git merge upstream/master
-git push origin master
+git fetch upstream --tags     # --tags is required; a plain fetch may not bring them
+git checkout sparky
+git rebase v2026.07           # one release at a time, never an -rc tag
 ```
 
-To incrementally rebase `sparky` onto the new master, rebase through each stable release tag one at a time (e.g. `git rebase v2026.07`), resolving conflicts at each step before moving to the next.
+`git describe --tags --abbrev=0 sparky` reports the release you are currently
+based on. If it names something implausibly old, the tags are missing rather
+than the branch being stale.
+
+U-Boot releases **quarterly** — `vYYYY.01`, `vYYYY.04`, `vYYYY.07`, `vYYYY.10`
+— each preceded by `rc1`..`rc5`. So a rebase is due about every three months.
+Never rebase onto an `-rc` tag.
+
+### Sizing a hop before starting it
+
+Only files that *both* sides touched can conflict, and that set is usually
+tiny. Compute it first:
+
+```bash
+git diff --name-only v2026.04 sparky   | sort > /tmp/yours
+git diff --name-only v2026.04 v2026.07 | sort > /tmp/upstream
+comm -12 /tmp/yours /tmp/upstream
+```
+
+For the v2026.04 → v2026.07 hop that is 11 files out of 5808 upstream
+changed, and every one is a registration-list collision — upstream added an
+entry, you added an entry, keep both:
+
+`arch/m68k/Kconfig`, `arch/m68k/lib/Makefile`, `drivers/block/Kconfig`,
+`drivers/serial/{Kconfig,Makefile}`, `drivers/gpio/{Kconfig,Makefile}`,
+`drivers/timer/Kconfig`, `doc/board/index.rst`, and `cmd/mmc.c` +
+`drivers/mmc/mmc.c` (see below).
+
+`drivers/block/ide.c` is a modified upstream file and *will* conflict on some
+future hop — see the rebase note in the CompactFlash section for exactly what
+is in it.
+
+### Afterwards
+
+A rebase that compiles is not a rebase that works. Rebuild, reflash and
+confirm the board boots to a prompt and still probes the CompactFlash before
+trusting it.
 
 ## What this fork adds (sparky branch summary)
 
