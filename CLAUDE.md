@@ -209,6 +209,7 @@ finer time source (see below). Measured on a SanDisk SDCFX-008G:
 | per sector | 10.01 ms | 1.045 ms |
 | bulk read rate | **50.0 KB/s** | **478 KB/s** |
 | `load` of a 4 KB file | ~1.4 s | 0.150 s |
+| `ide write` 1024 sectors (512 KB) | — | 3.160 s (**162 KB/s**) |
 | `ide reset` (full probe) | 0.360 s | 0.090 s |
 
 The cost was **not** `ide_wait()` — its `udelay(100)` only runs when the card is
@@ -226,8 +227,9 @@ to come from the bus. Sixteen-bit mode is wired up in `cfmanager` but commented
 out; enabling it needs the PLD change, CF D8–D15 wired to D23–D16, **and**
 clearing `CONFIG_SYS_ATA_DATA_8BIT`.
 
-Writing has **not** been re-measured since the change; the old figure was
-~18 KB/s (2 MB of filesystem metadata in 112 s).
+Writing gained about as much: 512 KB in 3.160 s, against an old
+filesystem-level figure of ~18 KB/s (2 MB of metadata in 112 s). But see the
+known write-corruption bug below before relying on any of it.
 
 ### A real time source for `udelay()`
 
@@ -310,9 +312,10 @@ driver just had its resolution changed and a card being carried by the old
 - `part list` parses the FAT32 partition, and a PC-written text file reads back
   as correct ASCII.
 
-**The write path has not been re-measured or re-verified** — the tests for it
-overwrite the card, and on the current reference card LBA `0x1000` lands inside
-FAT2. Use a high LBA in unallocated space instead.
+The write path was tested too, at LBA `0x100000` in unallocated space — on the
+current reference card the documented LBA `0x1000` lands inside FAT2. It is
+about 9x faster as well, but it **also turned out to corrupt sectors**, on the
+old image just as much as the new one. See the known-bug section above.
 
 ### Rebase note
 
@@ -919,6 +922,56 @@ transposed — fix `ide_input_data()`, do not "correct" it downstream. If the
 card has no partition table at all this check says nothing; fall back to
 running the hardware project's `tests/cf_test/` and reading a sector it
 wrote.
+
+#### KNOWN BUG — the write path duplicates a byte, intermittently
+
+**Do not trust CompactFlash writes from the SBC for anything that matters.**
+Measured 2026-08-29 on the SanDisk SDCFX-008G.
+
+Roughly **5–8% of written sectors come back corrupted**, always with the same
+signature: one byte is duplicated and the rest of the sector is shifted one
+byte later, losing the final byte. Two examples, source vs read-back:
+
+```
+fd 4c d0 81 2f 00 2d 40 ...   source
+fd 4c d0 d0 81 2f 00 2d ...   read back   (d0 duplicated)
+
+48 6e ff fc ...               source
+48 48 6e ff ...               read back   (48 duplicated)
+```
+
+The offset moves from run to run and is *not* tied to a sector boundary, so it
+happens inside `ide_output_data()`'s 512-byte loop, not at the inter-sector
+turnaround. Reproduce with the 8-sector test above; expect 3–5 failures in 10.
+
+**It is not caused by the `udelay()` change, and it is not new.** Both images
+were flashed and run through the identical 10-trial test on the same card:
+
+| | failures / 10 runs of 8 sectors |
+|---|---|
+| pre-`udelay` (100 Hz tick floor) | 5 |
+| counter-based `udelay()` | 3 |
+
+**Reads are clean.** 640 sectors read with zero mismatches, and an 8-sector
+read matches eight independent single-sector reads of the same LBAs byte for
+byte. This is write-only.
+
+**Why it went unnoticed.** The one thing the write path had been exercised by
+is formatting a card from the SBC — and that writes **almost entirely zeros**
+(the metadata region is blasted with a zero buffer). A duplicated byte inside a
+run of zeros is invisible: the sector is still all zeros. Only the eight
+content sectors carry non-zero data, and they are themselves mostly zeros. So a
+format can succeed, and Linux can mount the result, while the write path is
+this broken. A `cmp` round-trip through this driver does not catch it either —
+the corruption is on the card, so it reads back exactly as written.
+
+**Prime suspect is write cycle timing, in `cfmanager` rather than in U-Boot.**
+The GAL stretches every CF cycle to ~437 ns (see the wiring table above), but
+ATA PIO mode 0 wants a **600 ns minimum cycle time**; a short cycle plus
+inadequate `/IOWR` recovery would let one write be latched twice, which is
+exactly the observed signature. Reads tolerating what writes do not is
+consistent with that. Verify with a scope or analyser on `/IOWR` before
+changing anything — this has not been confirmed.
 
 #### A scrambled model string does not mean a driver bug
 
