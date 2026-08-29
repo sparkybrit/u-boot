@@ -215,7 +215,216 @@ clearing `CONFIG_SYS_ATA_DATA_8BIT`.
 rebasing through release tags. The changes are three `#if
 IS_ENABLED(CONFIG_SYS_ATA_DATA_8BIT)` blocks around the data-path functions,
 the `ide_set_8bit_mode()` helper and its call in `ide_ident()`, the `0xFF`
-no-device check in `ide_init_one()`, and `.of_match` on `U_BOOT_DRIVER(ide)`.
+no-device check in `ide_init_one()`, `.of_match` on `U_BOOT_DRIVER(ide)`, and
+the `strlcpy()` size fix in `ide_probe()` (upstream passes `BLK_*_SIZE` where
+the buffers are `BLK_*_SIZE + 1`, which truncates a maximum-length string by
+one character - it printed `HDX 5.08` as `HDX 5.0`). That last one is an
+upstream bug, not a sparky1 change, and should drop out once fixed upstream.
+
+### Upstream submission — the `strlcpy()` fix
+
+**Sent 2026-08-29, awaiting review.** This is an **upstream U-Boot bug**, not a
+sparky1 change, so it goes to the mailing list and should disappear from this
+fork on a later rebase.
+
+| | |
+|---|---|
+| Message-Id | `20260829-ide-strlcpy-fix-v1-1-05676b02d822@gmail.com` |
+| Archive | `lore.kernel.org/u-boot/<message-id>/` |
+| Patchwork | `patchwork.ozlabs.org/project/uboot/` |
+| Local tag | `sent/20260829-ide-strlcpy-fix-83225ba994d5-v1` |
+| Based on | `upstream/main` @ `67a095a6896` (v2026.10-rc3-13) |
+
+b4 tagged v1 as sent and rolled the tracking branch to **v2**, ready for a
+reroll if review asks for changes. Note `lore.kernel.org` sits behind Anubis
+(a proof-of-work anti-scraper gate), so scripted fetches of it fail — use the
+Patchwork REST API instead:
+
+```bash
+curl -s "https://patchwork.ozlabs.org/api/patches/?project=uboot&msgid=<message-id>"
+```
+
+The rest of this section records how it was done, which is what a reroll or a
+second patch will need.
+
+**U-Boot takes emailed patches, not GitHub PRs.** The tree ships a `.b4-config`,
+so `b4` is the recommended tool.
+
+**The bug.** `ide_probe()` copies the IDENTIFY strings into the block device's
+descriptor with `strlcpy(dst, src, BLK_*_SIZE)`. `strlcpy()` takes the full
+buffer size *including* the NUL and copies at most `size - 1` characters, but
+these fields are declared `char[BLK_*_SIZE + 1]` — so a maximum-length string
+loses its last character. An 8-character firmware revision (`HDX 5.08` on the
+SanDisk CF card here) is reported by `ide info` as `HDX 5.0`. The boot banner is
+unaffected because it prints the local `blk_desc` that `ide_ident()` filled,
+*before* this copy — that boot-vs-`ide info` split is what identified it.
+
+**The root cause** is a `strncpy()` → `strlcpy()` conversion that kept the size
+argument even though the two functions interpret it differently. The original
+was correct:
+
+```c
+strncpy(desc->vendor, ..., BLK_VEN_SIZE);
+desc->vendor[BLK_VEN_SIZE] = '\0';
+```
+
+copying up to `BLK_VEN_SIZE` characters into a `BLK_VEN_SIZE + 1` byte buffer,
+where `strlcpy(..., BLK_VEN_SIZE)` copies only `BLK_VEN_SIZE - 1`. The `Fixes:`
+tag is therefore `db89e72302d0` ("ide: Move setting of vendor strings into
+ide_probe()") — **not** `d7d57436e7a6`, which only swapped the source operand
+and left the size argument untouched. Check with
+`git log -S 'BLK_VEN_SIZE' -- drivers/block/ide.c`.
+
+The fix passes `sizeof()` the destination instead, and is deliberately a bare
+three-line change with no comment.
+
+#### Where it lives — a worktree, not a checkout
+
+```
+~/Projects/u-boot-ide-fix     branch ide-strlcpy-fix, based on upstream/main
+```
+
+The worktree is what makes this work at all. `CLAUDE.md` does not exist
+upstream and usually has uncommitted edits, so `git checkout -b … upstream/main`
+in the main tree **refuses** rather than deleting it — the `git stash push
+drivers/block/ide.c` route does not survive the checkout. A worktree sidesteps
+the stash entirely and leaves the `sparky` tree untouched:
+
+```bash
+git fetch upstream --tags
+git worktree add -b ide-strlcpy-fix ~/Projects/u-boot-ide-fix upstream/main
+```
+
+**Base on `upstream/main`, not `upstream/master`.** `upstream/master` is a
+stale ref trailing the live branch by a long way — confirm with
+`git rev-parse upstream/master upstream/main`, which shows two different
+commits.
+
+#### Tooling on beelink0
+
+Ubuntu 24.04 refuses `pip install b4` (PEP 668,
+`error: externally-managed-environment`). `apt install b4` works but needs sudo
+and gives an older 0.13.0. The no-sudo route is a venv, which also gets a
+current b4:
+
+```bash
+python3 -m venv ~/.venvs/b4
+~/.venvs/b4/bin/pip install b4
+ln -sf ~/.venvs/b4/bin/b4 ~/.local/bin/b4      # ~/.local/bin is already on PATH
+```
+
+Done — b4 0.16.0. `git send-email` is **not** installed (package `git-email`,
+needs sudo) and is not needed: b4 speaks SMTP itself.
+
+#### The commit — already made
+
+`git commit -s` (the `-s` adds `Signed-off-by:`, a Developer's Certificate of
+Origin assertion, not a formality). Both `scripts/checkpatch.pl --strict -g HEAD`
+and `b4 prep --check` are clean. Recipients came from:
+
+```bash
+b4 prep --enroll upstream/main
+b4 prep --auto-to-cc
+```
+
+giving **To** Simon Glass `<sjg@chromium.org>` and the list, **Cc** Tom Rini
+`<trini@konsulko.com>` (maintainer). b4 folds the cover letter into a
+single-patch series automatically, so the `EDITME` placeholder never goes out.
+
+**The list address is `u-boot@lists.u-boot-project.org`.** The older
+`u-boot@lists.denx.de` is out of date; `get_maintainer.pl` reports the current
+one.
+
+#### Sending
+
+1. Create a Gmail App Password at `myaccount.google.com/apppasswords`
+   (requires 2FA on the account; blocked if Advanced Protection is on).
+2. Mail it to yourself first, check it is not whitespace-mangled, then send:
+
+```bash
+cd ~/Projects/u-boot-ide-fix
+b4 send --reflect --no-sign     # to yourself; prompts for the password
+b4 send --no-sign
+```
+
+**`--reflect` keeps the real `To:`/`Cc:` headers** and rewrites only the SMTP
+envelope, so the copy in your inbox lists Simon Glass and the list even though
+delivery was to you alone. That is the point — it shows what the real send will
+look like. Nothing leaks to the list.
+
+Confirm the reflected copy survived Gmail byte-intact before the real send —
+this is the check that matters, and identical tree hashes prove it where eyeballing
+the diff does not:
+
+```bash
+git checkout -b am-test upstream/main
+git am ~/Downloads/<saved>.eml          # must apply cleanly
+git rev-parse am-test^{tree} ide-strlcpy-fix^{tree}   # must match
+git checkout ide-strlcpy-fix && git branch -D am-test
+```
+
+The commit SHAs *will* differ — `git am` makes a new commit with a new
+committer timestamp. Tree hash and patch-id are what must match.
+
+`--no-sign` is required **every time**. With no SMTP settings b4 defaults to
+the kernel.org **web endpoint**, which mandates a patatt signature and aborts
+with `patatt.signingkey is not set`; `--no-sign` plus the configured SMTP
+settings switches it to plain SMTP. (`patatt genkey` +
+`b4 send --web-auth-new` is the alternative, and then needs no SMTP at all.)
+
+The non-secret SMTP settings are already in `~/.gitconfig` —
+`sendemail.smtpserver` = `smtp.gmail.com`, port 587, tls, and `smtpuser`.
+
+**b4 prompts for the app password on every send, and never stores it.**
+`git_credential_fill()` runs `git credential fill` and returns the password,
+but never calls `git credential approve` — so `credential.helper = store` never
+gets the chance to save it, and nothing lands in `~/.git-credentials`. Retyping
+16 characters blind at a `getpass` prompt is the most likely source of a
+`535 5.7.8 Username and Password not accepted`: Google displays the password as
+`abcd efgh ijkl mnop`, and pasting it *with* the spaces gives 19 characters and
+a rejection. To store it deliberately and stop the prompting (plaintext, mode
+0600):
+
+```bash
+ printf 'protocol=smtp\nhost=smtp.gmail.com:587\nusername=graeme.harker@gmail.com\npassword=APPPASSWORD\n' \
+  | git credential approve
+```
+
+(Leading space keeps it out of `~/.bash_history`.)
+
+**Type the app password without its spaces.** Google displays it as
+`abcd efgh ijkl mnop`; the spaces are visual grouping, not part of the secret.
+b4 passes whatever you type **verbatim** to `smtp.login()` — nothing strips it —
+so including them sends a 19-character password and earns
+`535 5.7.8 Username and Password not accepted`, which reads exactly like a
+revoked or wrong password. This cost several failed sends. A quick way to tell
+the two apart, since a `getpass` prompt shows nothing:
+
+```python
+import getpass, smtplib
+pw = getpass.getpass().replace(" ", "")
+print(len(pw))                      # must be 16
+s = smtplib.SMTP("smtp.gmail.com", 587); s.starttls()
+s.login("graeme.harker@gmail.com", pw)   # no mail sent
+```
+
+If that succeeds but `b4 send` still fails, the password is fine and the spaces
+are the difference.
+
+**Gotcha:** `scripts/get_maintainer.pl` gives a polluted answer when run inside
+this fork — it reports *you* as a contributor, because local commits touch
+`ide.c`. Run it from the worktree. It also wants a patch file, not a revision
+range:
+
+```bash
+git format-patch -1 -o /tmp && scripts/get_maintainer.pl --norolestats /tmp/0001-*.patch
+```
+
+**Afterwards.** Track it at `patchwork.ozlabs.org/project/uboot/`. Expect a
+wait; U-Boot batches through merge windows and `-rc` periods take fixes only —
+which is fine, this *is* a fix. Once it lands upstream, drop the local change,
+remove it from the `ide.c` rebase note above so it stops being a rebase
+conflict, and `git worktree remove ~/Projects/u-boot-ide-fix`.
 
 ## Repository layout (m68k-relevant paths)
 
