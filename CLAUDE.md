@@ -199,15 +199,76 @@ software-controlled either, so `CONFIG_IDE_RESET` stays off and there is no
 
 ### Throughput
 
-Limited by the 100 Hz system timer, not the bus. `ide_wait()` polls with
-`udelay(100)`, and the finest tick available is 10 ms, so any transfer that has
-to wait at all waits a whole tick. Measured on a SanDisk SDCFX-008G: **~50 KB/s
-reading** (a 4 KB file via `load` takes ~1.4 s once directory and FAT lookups
-are counted) and **~18 KB/s writing** (2 MB of filesystem metadata in 112 s).
+Limited by the 100 Hz system timer, not the bus. Measured on a SanDisk
+SDCFX-008G: **~50 KB/s reading** (a 4 KB file via `load` takes ~1.4 s once
+directory and FAT lookups are counted) and **~18 KB/s writing** (2 MB of
+filesystem metadata in 112 s).
+
+The cost is **not** `ide_wait()` — its `udelay(100)` only runs when the card is
+actually BUSY. It is the **unconditional `udelay(50)` inside `ide_read()`'s
+per-block loop**, right after the PIO read command. Every `udelay()` on this
+board costs a full 10 ms tick whatever you ask for, because `usec_to_tick(50)`
+is 0 at 100 Hz and `__udelay()`'s loop is `while (get_ticks() < tmp+1)` — the
+`+1` forces a wait for the next tick edge. One tick per sector caps reads at
+~100 sectors/s ≈ 51 KB/s, which is exactly what is measured.
+
 Going faster means a finer time source — the XR68C681 counter registers can be
-read live — not a faster bus. Sixteen-bit mode is wired up in `cfmanager` but commented
+read live — not a faster bus. See the TODO below. Sixteen-bit mode is wired up in `cfmanager` but commented
 out; enabling it needs the PLD change, CF D8–D15 wired to D23–D16, **and**
 clearing `CONFIG_SYS_ATA_DATA_8BIT`.
+
+### TODO — give `udelay()` a real time source
+
+Not done. Would lift CF throughput by roughly an order of magnitude and improve
+every timeout in U-Boot; nothing depends on the current behaviour.
+
+**Why it is safe to change.** The 100 Hz timer interrupt does exactly one thing:
+
+```c
+static void timer_interrupt_handler(void *arg)
+{
+	readb(&base->uopc);   /* clear the interrupt */
+	counter++;            /* and that is all */
+}
+```
+
+`counter` has exactly two references — incremented there, read by
+`get_count()`. It is the only IRQ handler installed (the other
+`irq_install_handler()` call lives in `arch/m68k/lib/time.c`, which is
+`obj-$(CONFIG_MCFTMR)` and not built for sparky1), and it is the only DUART
+interrupt source enabled: the serial driver writes `uimr = 0`, the timer then
+writes `uimr = 0b1000`. Nothing else uses the interrupt.
+
+**What is NOT safe to change casually.** The timer *as a time source* backs
+`get_timer()`, `get_ticks()` and every timeout in U-Boot, and the timer uclass
+converts counts to time using `priv->clock_rate`, which comes from
+`clock-frequency = <100>` in `arch/m68k/dts/sparky1.dts`. Redefining what
+`counter` means ripples through all of that.
+
+**The contained fix: override `__udelay()` at board level.** It is declared
+`__weak` in `lib/time.c`, and two trees already override it
+(`board/armltd/integrator/timer.c`, and the ColdFire `arch/m68k/lib/time.c`).
+A sparky1 `__udelay()` that spins on the live counter leaves `counter`,
+`clock-frequency` and `get_timer()` untouched:
+
+- The XR68C681 counter decrements at 3.6864 MHz / 16 = **230400 Hz**, i.e. one
+  count per **4.34 µs** — about 2300× finer than the 10 ms tick.
+- Read CTU/CTL live, spin until enough counts have elapsed, handling wrap.
+
+**Two wrinkles to handle:**
+
+1. In timer mode the counter reaches zero **twice** per interrupt period
+   (`f = clk / 2N`, N = 1152), so its absolute phase is ambiguous. That is fine
+   for a delay, where only *elapsed* counts matter, but it is why this cannot
+   naively be reused to make `get_count()` fine-grained as well.
+2. The counter is not running until `xr68c681_timer_probe()` starts it, so
+   guard against `udelay()` calls made earlier in `board_init_f`. Falling back
+   to a spin loop is acceptable there.
+
+**Expected result.** The per-sector cost drops from 10 ms to ~50 µs, after which
+reads are bounded by the transfer itself (512 byte-reads, ~0.5–1 ms/sector)
+rather than the tick. Verify with `time ide read 0x40100000 0x1000 0x80`
+(128 sectors) before and after — do not trust an estimate, measure it.
 
 ### Rebase note
 
