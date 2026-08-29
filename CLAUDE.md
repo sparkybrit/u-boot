@@ -234,7 +234,8 @@ known write-corruption bug below before relying on any of it.
 ### A real time source for `udelay()`
 
 **Done — 9.6× on bulk CF reads, measured.** Also improves every timeout in
-U-Boot; nothing depended on the old behaviour.
+U-Boot; nothing depended on the old behaviour. Lives on branch
+`sparky-udelay`, three commits, **not yet merged into `sparky`**.
 
 **Why it is safe to change.** The 100 Hz timer interrupt does exactly one thing:
 
@@ -316,6 +317,90 @@ The write path was tested too, at LBA `0x100000` in unallocated space — on the
 current reference card the documented LBA `0x1000` lands inside FAT2. It is
 about 9x faster as well, but it **also turned out to corrupt sectors**, on the
 old image just as much as the new one. See the known-bug section above.
+
+### TODO — fix the CompactFlash write corruption
+
+**Not started, and it is the most important thing outstanding on this board:**
+~5-8% of sectors written from the SBC come back with one byte duplicated and
+the rest of the sector shifted a byte later. Writes cannot be trusted for real
+data until this is understood. Full evidence, with the failure signature and
+the before/after trial counts, is under
+[KNOWN BUG](#known-bug--the-write-path-duplicates-a-byte-intermittently) in the
+Testing section.
+
+**Reproduce.** At the prompt, with a card whose LBA `0x100000` is unallocated:
+
+```
+cp.l 0x00001000 0x40100000 0x400
+mw.l 0x40110000 0x00000000 0x400
+ide write 0x40100000 0x100000 0x8
+ide read  0x40110000 0x100000 0x8
+cmp.l 0x40100000 0x40110000 0x400
+```
+
+Expect **3-5 failures in 10 runs**. Drive it from a script rather than by hand
+— `fuser -v /dev/ttyUSB0` will name minicom if it is holding the port.
+
+> **One passing run proves nothing.** The pass rate is 50-70%, so any change
+> must be judged over **at least 10 trials**, and ideally against the same
+> 10-trial baseline. This is the easiest way to fool yourself here.
+
+**Already ruled out — do not redo this work:**
+
+- **Not a `udelay()` regression.** Both images were flashed and run through the
+  identical 10-trial test on the same card: pre-`udelay` failed 5/10, the
+  counter-based build 3/10.
+- **Not the read path.** 640 sectors read with zero mismatches, and an
+  8-sector read matches eight independent single-sector reads of the same LBAs
+  byte for byte.
+- **Not the inter-sector turnaround.** The corrupted offset moves between runs
+  and lands mid-sector (0x1b4, 0x26c, 0x3a8 have all been seen), so it is
+  inside the 512-byte loop, not at a sector boundary.
+- **Not a read-back artifact.** Two separate reads return the same corrupted
+  bytes, so the damage is on the card.
+
+**The mechanism** has to be one host write cycle being latched twice — the card
+stores 512 bytes, so the duplicate pushes everything along and the last byte
+falls off the end. Two candidates, and they need different fixes:
+
+1. `/IOWR` double-clocking in the `cfmanager` GAL — a short cycle or thin
+   recovery letting one strobe read as two.
+2. A **68030 bus-cycle retry** (`/BERR` and `/HALT` asserted together), which
+   genuinely re-executes the write. Spurious retries would look identical from
+   software.
+
+**The code** is the 8-bit branch of `ide_output_data()` in
+`drivers/block/ide.c`: four back-to-back `outb`s per iteration, 128
+iterations, no `EIEIO` and no pacing of any kind. Note that the 8-bit
+`ide_input_data()` is its mirror image and is clean — so "the loop is simply
+too fast" is not a complete explanation on its own, and whatever is proposed
+has to say why only writes fail. (Write recovery being tighter than read on the
+CF side is the obvious answer, but it is an assumption until measured.)
+
+**Investigate cheapest first:**
+
+1. **Pad the write loop.** Insert NOPs, or a short delay, between the `outb`s
+   and re-run 10 trials. Decisive on whether it is cycle timing, costs one
+   rebuild, and needs no hardware. There is precedent — NOP padding was tried
+   on the *read* path during the counterfeit-card episode below.
+2. **Try a second CF card.** One power cycle, and rules out behaviour specific
+   to this SanDisk. This was the fastest discriminator last time too.
+3. **Run the hardware project's `../sparky1/tests/cf_test/`.** If its bare-metal
+   write path is clean, the fault is in U-Boot's loop rather than the GAL —
+   which is the single most valuable thing to know before touching either.
+4. **Put the Saleae on `/IOWR`.** Measure real cycle time, pulse width and
+   recovery against ATA PIO mode 0's 600 ns minimum cycle; the GAL is currently
+   documented as stretching to ~437 ns. See the machine-wide `CLAUDE.md` for
+   the Logic Pro 16's connection quirk before blaming the capture.
+
+**If the fix turns out to be software**, pace only the 8-bit path so other
+boards are unaffected — it belongs inside the existing
+`CONFIG_SYS_ATA_DATA_8BIT` block — and add it to the `ide.c` rebase note below.
+**If it turns out to be the PLD**, it is a `cfmanager` change in the hardware
+project, and this fork needs nothing.
+
+**Verify** over 10+ trials, and re-run the read tests as well: anything that
+touches the shared data path can regress reads, which are currently clean.
 
 ### Rebase note
 
