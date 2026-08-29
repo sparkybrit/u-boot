@@ -199,29 +199,40 @@ software-controlled either, so `CONFIG_IDE_RESET` stays off and there is no
 
 ### Throughput
 
-Limited by the 100 Hz system timer, not the bus. Measured on a SanDisk
-SDCFX-008G: **~50 KB/s reading** (a 4 KB file via `load` takes ~1.4 s once
-directory and FAT lookups are counted) and **~18 KB/s writing** (2 MB of
-filesystem metadata in 112 s).
+Was limited by the 100 Hz system timer, not the bus, until `__udelay()` got a
+finer time source (see below). Measured on a SanDisk SDCFX-008G:
 
-The cost is **not** `ide_wait()` — its `udelay(100)` only runs when the card is
-actually BUSY. It is the **unconditional `udelay(50)` inside `ide_read()`'s
+| | 100 Hz tick floor | counter-based `udelay()` |
+|---|---|---|
+| `ide read` 128 sectors (64 KB) | 1.300 s | 0.140–0.150 s |
+| `ide read` 1024 sectors (512 KB) | 10.250 s | 1.070 s |
+| per sector | 10.01 ms | 1.045 ms |
+| bulk read rate | **50.0 KB/s** | **478 KB/s** |
+| `load` of a 4 KB file | ~1.4 s | 0.150 s |
+| `ide reset` (full probe) | 0.360 s | 0.090 s |
+
+The cost was **not** `ide_wait()` — its `udelay(100)` only runs when the card is
+actually BUSY. It was the **unconditional `udelay(50)` inside `ide_read()`'s
 per-block loop**, right after the PIO read command. Every `udelay()` on this
-board costs a full 10 ms tick whatever you ask for, because `usec_to_tick(50)`
-is 0 at 100 Hz and `__udelay()`'s loop is `while (get_ticks() < tmp+1)` — the
-`+1` forces a wait for the next tick edge. One tick per sector caps reads at
-~100 sectors/s ≈ 51 KB/s, which is exactly what is measured.
+board used to cost a full 10 ms tick whatever it asked for, because
+`usec_to_tick(50)` is 0 at 100 Hz and `__udelay()`'s loop is
+`while (get_ticks() < tmp+1)` — the `+1` forces a wait for the next tick edge.
+One tick per sector capped reads at ~100 sectors/s ≈ 51 KB/s, and the measured
+10.01 ms per sector says that was the whole of it.
 
-Going faster means a finer time source — the XR68C681 counter registers can be
-read live — not a faster bus. See the TODO below. Sixteen-bit mode is wired up in `cfmanager` but commented
+At 1.045 ms per sector the read is now bounded by the transfer itself — 512
+single-byte port reads — rather than by any delay, so the next gain would have
+to come from the bus. Sixteen-bit mode is wired up in `cfmanager` but commented
 out; enabling it needs the PLD change, CF D8–D15 wired to D23–D16, **and**
 clearing `CONFIG_SYS_ATA_DATA_8BIT`.
 
+Writing has **not** been re-measured since the change; the old figure was
+~18 KB/s (2 MB of filesystem metadata in 112 s).
+
 ### A real time source for `udelay()`
 
-**Implemented on branch `sparky-udelay`; not yet measured on hardware.** Should
-lift CF throughput by roughly an order of magnitude and improve every timeout
-in U-Boot; nothing depended on the old behaviour.
+**Done — 9.6× on bulk CF reads, measured.** Also improves every timeout in
+U-Boot; nothing depended on the old behaviour.
 
 **Why it is safe to change.** The 100 Hz timer interrupt does exactly one thing:
 
@@ -282,13 +293,26 @@ cast; testing `gd->timer` directly is also what keeps this off the
    than N — is not worth pinning down. The two differ by 0.09%; the code
    counts the longer, which errs towards delaying slightly too long.
 
-**Expected result — not yet confirmed.** The per-sector cost should drop from
-10 ms to ~50 µs, after which reads are bounded by the transfer itself (512
-byte-reads, ~0.5–1 ms/sector) rather than the tick. Measure with
-`time ide read 0x40100000 0x1000 0x80` (128 sectors) before and after — do not
-trust the estimate. Also re-run the CompactFlash probe and read/write integrity
-tests above: every timeout in the IDE driver just got its resolution changed,
-so a card that was being carried by the old 10 ms floor would now fail.
+**Measured result.** Per-sector cost dropped from 10.01 ms to 1.045 ms, so
+reads are now bounded by the transfer itself (512 byte-reads) exactly as
+predicted — the estimate of ~0.5–1 ms/sector was right. Bulk reads went from
+50.0 KB/s to 478 KB/s. See the throughput table above for the full set.
+
+Correctness was re-checked at the same time, because every timeout in the IDE
+driver just had its resolution changed and a card being carried by the old
+10 ms floor would now fail:
+
+- the CF probes on the first attempt at boot, with model, firmware and serial
+  all intact;
+- two independent 64 KB reads of the same LBA are byte-identical;
+- LBA 0 still reads `0x55aa` at offset `0x1FE`, so the sector byte order is
+  right against data the board did not write;
+- `part list` parses the FAT32 partition, and a PC-written text file reads back
+  as correct ASCII.
+
+**The write path has not been re-measured or re-verified** — the tests for it
+overwrite the card, and on the current reference card LBA `0x1000` lands inside
+FAT2. Use a high LBA in unallocated space instead.
 
 ### Rebase note
 
