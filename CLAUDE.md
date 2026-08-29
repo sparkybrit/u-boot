@@ -217,10 +217,11 @@ read live — not a faster bus. See the TODO below. Sixteen-bit mode is wired up
 out; enabling it needs the PLD change, CF D8–D15 wired to D23–D16, **and**
 clearing `CONFIG_SYS_ATA_DATA_8BIT`.
 
-### TODO — give `udelay()` a real time source
+### A real time source for `udelay()`
 
-Not done. Would lift CF throughput by roughly an order of magnitude and improve
-every timeout in U-Boot; nothing depends on the current behaviour.
+**Implemented on branch `sparky-udelay`; not yet measured on hardware.** Should
+lift CF throughput by roughly an order of magnitude and improve every timeout
+in U-Boot; nothing depended on the old behaviour.
 
 **Why it is safe to change.** The 100 Hz timer interrupt does exactly one thing:
 
@@ -248,27 +249,46 @@ converts counts to time using `priv->clock_rate`, which comes from
 **The contained fix: override `__udelay()` at board level.** It is declared
 `__weak` in `lib/time.c`, and two trees already override it
 (`board/armltd/integrator/timer.c`, and the ColdFire `arch/m68k/lib/time.c`).
-A sparky1 `__udelay()` that spins on the live counter leaves `counter`,
-`clock-frequency` and `get_timer()` untouched:
+The sparky1 `__udelay()` in `board/sparky/sparky1/sparky1.c` spins on the live
+counter and leaves `counter`, `clock-frequency` and `get_timer()` untouched.
+The XR68C681 counter decrements at 3.6864 MHz / 16 = **230400 Hz**, one count
+per **4.34 µs** — about 2300× finer than the 10 ms tick.
 
-- The XR68C681 counter decrements at 3.6864 MHz / 16 = **230400 Hz**, i.e. one
-  count per **4.34 µs** — about 2300× finer than the 10 ms tick.
-- Read CTU/CTL live, spin until enough counts have elapsed, handling wrap.
+**How it finds the hardware.** From `gd->timer`, which `dm_timer_init()` sets
+only *after* `device_probe()` returns — so a non-NULL `gd->timer` is itself the
+proof that `xr68c681_timer_probe()` has run and started the counter. Its
+`mc68681_plat` supplies the register base and its `timer_dev_priv.clock_rate`
+supplies the tick rate, from which the reload value N is recovered as
+`230400 / (2 × clock_rate)` rather than duplicating the driver's `0x0480`.
+A `gd->timer->driver != DM_DRIVER_REF(xr68c681_timer)` check guards the plat
+cast; testing `gd->timer` directly is also what keeps this off the
+`get_ticks()` path, which would otherwise call `dm_timer_init()` and panic.
 
-**Two wrinkles to handle:**
+**The wrinkles, and what they cost:**
 
 1. In timer mode the counter reaches zero **twice** per interrupt period
-   (`f = clk / 2N`, N = 1152), so its absolute phase is ambiguous. That is fine
-   for a delay, where only *elapsed* counts matter, but it is why this cannot
-   naively be reused to make `get_count()` fine-grained as well.
-2. The counter is not running until `xr68c681_timer_probe()` starts it, so
-   guard against `udelay()` calls made earlier in `board_init_f`. Falling back
-   to a spin loop is acceptable there.
+   (`f = clk / 2N`, N = 1152), so its absolute phase is ambiguous. Only
+   *elapsed* counts are used, so that does not matter here — but it is why this
+   cannot naively be reused to make `get_count()` fine-grained as well.
+2. The counter is not running until `xr68c681_timer_probe()` starts it, so a
+   `udelay()` from `board_init_f` falls back to a NOP loop scaled from
+   `CFG_SYS_CLK`. Accurate to no better than a factor of two, which is all
+   early code needs. (Nothing currently calls it that early; before this
+   change such a call would have panicked.)
+3. CTU and CTL are two byte reads of a running counter, so the upper half is
+   read twice and the pair retried if it moved. It changes once every 256
+   counts (~1.1 ms), so this never spins more than once.
+4. Whether the reload consumes a clock — making the cycle N+1 counts rather
+   than N — is not worth pinning down. The two differ by 0.09%; the code
+   counts the longer, which errs towards delaying slightly too long.
 
-**Expected result.** The per-sector cost drops from 10 ms to ~50 µs, after which
-reads are bounded by the transfer itself (512 byte-reads, ~0.5–1 ms/sector)
-rather than the tick. Verify with `time ide read 0x40100000 0x1000 0x80`
-(128 sectors) before and after — do not trust an estimate, measure it.
+**Expected result — not yet confirmed.** The per-sector cost should drop from
+10 ms to ~50 µs, after which reads are bounded by the transfer itself (512
+byte-reads, ~0.5–1 ms/sector) rather than the tick. Measure with
+`time ide read 0x40100000 0x1000 0x80` (128 sectors) before and after — do not
+trust the estimate. Also re-run the CompactFlash probe and read/write integrity
+tests above: every timeout in the IDE driver just got its resolution changed,
+so a card that was being carried by the old 10 ms floor would now fail.
 
 ### Rebase note
 
