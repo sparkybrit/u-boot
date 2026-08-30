@@ -91,7 +91,9 @@ trusting it.
 ### CompactFlash / IDE
 - `arch/m68k/dts/sparky1.dts` — `ide@c0000000` node, `compatible = "u-boot,ide"`
 - `board/sparky/sparky1/sparky1.c` — `board_late_init()` probes the controller
-- Uses upstream `drivers/block/ide.c` in 8-bit mode; see [CompactFlash / IDE](#compactflash--ide--key-implementation-notes)
+- Uses upstream `drivers/block/ide.c` in 8-bit mode, plus `ide_wait_drq()` so a
+  late DRQ does not abort a transfer; see
+  [CompactFlash / IDE](#compactflash--ide--key-implementation-notes)
 
 ### Modified upstream files
 - `arch/m68k/include/asm/uart.h` → moved to `arch/m68k/include/asm/coldfire/uart.h` (restored to upstream ColdFire content; `serial_mcf.c` updated to match)
@@ -135,7 +137,7 @@ The counter/timer runs at 100 Hz: N=0x0480 (1152), f = (3.6864 MHz / 16) / (2 ×
 ## CompactFlash / IDE — key implementation notes
 
 A CompactFlash card in True IDE mode hangs off `/DISKCS` at `0xC0000000`. It is
-driven by upstream's generic `drivers/block/ide.c`, which needed three changes
+driven by upstream's generic `drivers/block/ide.c`, which needed four changes
 to cope with the wiring.
 
 ### The wiring
@@ -227,9 +229,11 @@ to come from the bus. Sixteen-bit mode is wired up in `cfmanager` but commented
 out; enabling it needs the PLD change, CF D8–D15 wired to D23–D16, **and**
 clearing `CONFIG_SYS_ATA_DATA_8BIT`.
 
-Writing gained about as much: 512 KB in 3.160 s, against an old
-filesystem-level figure of ~18 KB/s (2 MB of metadata in 112 s). But see the
-known write-corruption bug below before relying on any of it.
+Writing gained about as much: 512 KB in **2.87–3.01 s** (~170 KB/s), against an
+old filesystem-level figure of ~18 KB/s (2 MB of metadata in 112 s). Long writes
+now run to completion — the `no IRQ` stall that used to abort them is fixed —
+but a residual ~0.002% sector corruption remains; see below before trusting
+writes with real data.
 
 ### A real time source for `udelay()`
 
@@ -316,91 +320,99 @@ driver just had its resolution changed and a card being carried by the old
 The write path was tested too, at LBA `0x100000` in unallocated space — on the
 current reference card the documented LBA `0x1000` lands inside FAT2. It is
 about 9x faster as well, but it **also turned out to corrupt sectors**, on the
-old image just as much as the new one. See the known-bug section above.
+old image just as much as the new one. That corruption was later traced to
+signal integrity on the CF data lines and largely cured by termination
+resistors; making `udelay()` honest also exposed a latent driver bug in the
+write handshake, since fixed. See the next section for both.
 
-### TODO — fix the CompactFlash write corruption
+### The write path — corruption ~3000x rarer, stall fixed
 
-**Not started, and it is the most important thing outstanding on this board:**
-~5-8% of sectors written from the SBC come back with one byte duplicated and
-the rest of the sector shifted a byte later. Writes cannot be trusted for real
-data until this is understood. Full evidence, with the failure signature and
-the before/after trial counts, is under
-[KNOWN BUG](#known-bug--the-write-path-duplicates-a-byte-intermittently) in the
-Testing section.
+**Worked 2026-08-30.** Two independent faults were stacked on top of one
+another, and neither was quite where the 2026-08-29 notes suspected. One is
+fixed outright; the other is enormously improved but **not** gone.
 
-**Reproduce.** At the prompt, with a card whose LBA `0x100000` is unallocated:
+**1. Byte-duplication corruption — hugely reduced by a hardware change, not
+eliminated.** ~5–8% of written sectors used to come back with one byte
+duplicated and the rest of the sector shifted a byte later. Fitting **33R
+series termination resistors on the data lines at the IDE connector** took that
+down to **1 corrupt sector in 46,736 written and verified** — about
+**0.002%**, a ~3000x reduction, but still a real failure. Nothing in this fork
+changed for it. The old suspicion — `cfmanager`'s `/IOWR` timing — was the right
+neighbourhood in that it is signal integrity on the CF bus, but termination
+rather than a PLD change carried almost all of it.
 
-```
-cp.l 0x00001000 0x40100000 0x400
-mw.l 0x40110000 0x00000000 0x400
-ide write 0x40100000 0x100000 0x8
-ide read  0x40110000 0x100000 0x8
-cmp.l 0x40100000 0x40110000 0x400
-```
+> **Writes are still not sound for bulk data.** At this rate a full 8 GB card
+> would take roughly 400 bad sectors, and one appears about every 24 MB. Verify
+> anything that matters, or chase the residual — the remaining event has the
+> identical duplicate-and-shift signature, so it is the same mechanism at a
+> lower rate, not a different fault.
 
-Expect **3-5 failures in 10 runs**. Drive it from a script rather than by hand
-— `fuser -v /dev/ttyUSB0` will name minicom if it is holding the port.
+**2. `Error (no IRQ) ... status 0x50` on long writes — a driver fix.** With the
+corruption largely out of the way, streaming writes turned out to abort after 50–700 blocks,
+about one stall per 170 blocks. `ide_write()` issues `ATA_CMD_PIO_WRITE` per
+block, waits `udelay(50)`, then requires DRQ — but `ide_wait()` only spins
+*while BSY is set*, so a card that has not asserted BSY yet, being still busy
+committing the previous sector, reads back as "not busy, no DRQ" and the write
+is abandoned. Status `0x50` is `DRDY|DSC` with BSY, DRQ **and** ERR all clear,
+which is precisely that signature: `ide_wait()` returned normally rather than
+timing out.
 
-> **One passing run proves nothing.** The pass rate is 50-70%, so any change
-> must be judged over **at least 10 trials**, and ideally against the same
-> 10-trial baseline. This is the easiest way to fool yourself here.
+The fix is `ide_wait_drq()` in `drivers/block/ide.c` — poll until the device is
+both out of BSY *and* asserting DRQ, break early on ERR, timeout unchanged. It
+replaces the DRQ wait in **both** `ide_write()` and `ide_read()`; the read path
+never stalls in practice (after a read data phase the card has no flash to
+program) but carries the identical latent bug, and fixing only one made the
+asymmetry look arbitrary for upstream.
 
-**Already ruled out — do not redo this work:**
+Only the **DRQ waits** were changed. Every BSY-only `ide_wait()` call is left
+alone, which matters: the wait after `ATA_CMD_CHK_POWER` in `ide_read()` follows
+a *non-data* command where DRQ is never asserted, so routing it through
+`ide_wait_drq()` would spin out the full 2 s timeout on every single read.
 
-- **Not a `udelay()` regression.** Both images were flashed and run through the
-  identical 10-trial test on the same card: pre-`udelay` failed 5/10, the
-  counter-based build 3/10.
-- **Not the read path.** 640 sectors read with zero mismatches, and an
-  8-sector read matches eight independent single-sector reads of the same LBAs
-  byte for byte.
-- **Not the inter-sector turnaround.** The corrupted offset moves between runs
-  and lands mid-sector (0x1b4, 0x26c, 0x3a8 have all been seen), so it is
-  inside the 512-byte loop, not at a sector boundary.
-- **Not a read-back artifact.** Two separate reads return the same corrupted
-  bytes, so the damage is on the card.
+The read path was measured before and after to prove no regression — 20 x 1024
+blocks each way, every read paired with a second read of the same LBA and
+compared:
 
-**The mechanism** has to be one host write cycle being latched twice — the card
-stores 512 bytes, so the duplicate pushes everything along and the last byte
-falls off the end. Two candidates, and they need different fixes:
+| | reads OK | paired reads differed | 1024-block time |
+|---|---|---|---|
+| before | 20/20 | 0 | 0.785 s mean |
+| after | 20/20 | 0 | 0.775 s mean |
 
-1. `/IOWR` double-clocking in the `cfmanager` GAL — a short cycle or thin
-   recovery letting one strobe read as two.
-2. A **68030 bus-cycle retry** (`/BERR` and `/HALT` asserted together), which
-   genuinely re-executes the write. Spurious retries would look identical from
-   software.
+Unchanged, as expected: when a device asserts BSY then DRQ normally, both
+helpers return at the same moment. They differ only in the case that was
+breaking writes.
 
-**The code** is the 8-bit branch of `ide_output_data()` in
-`drivers/block/ide.c`: four back-to-back `outb`s per iteration, 128
-iterations, no `EIEIO` and no pacing of any kind. Note that the 8-bit
-`ide_input_data()` is its mirror image and is clean — so "the loop is simply
-too fast" is not a complete explanation on its own, and whatever is proposed
-has to say why only writes fail. (Write recovery being tighter than read on the
-CF side is the obvious answer, but it is an assumption until measured.)
+**The evidence that isolated it to the driver**, all taken before the fix:
 
-**Investigate cheapest first:**
+| | result |
+|---|---|
+| `ide read` 1024 blocks ×5 | 5/5 complete, 5120 blocks, no stall |
+| `ide write` 1024 blocks ×10 | **0/10** complete, stalling at 54–704 blocks |
+| isolated single-block writes | 150/150 clean |
+| single-block retry at the stalling LBA | succeeds 5/6, immediately |
+| read timings against the table above | unchanged (0.130 s / 1.050 s) |
 
-1. **Pad the write loop.** Insert NOPs, or a short delay, between the `outb`s
-   and re-run 10 trials. Decisive on whether it is cycle timing, costs one
-   rebuild, and needs no hardware. There is precedent — NOP padding was tried
-   on the *read* path during the counterfeit-card episode below.
-2. **Try a second CF card.** One power cycle, and rules out behaviour specific
-   to this SanDisk. This was the fastest discriminator last time too.
-3. **Run the hardware project's `../sparky1/tests/cf_test/`.** If its bare-metal
-   write path is clean, the fault is in U-Boot's loop rather than the GAL —
-   which is the single most valuable thing to know before touching either.
-4. **Put the Saleae on `/IOWR`.** Measure real cycle time, pulse width and
-   recovery against ATA PIO mode 0's 600 ns minimum cycle; the GAL is currently
-   documented as stretching to ~437 ns. See the machine-wide `CLAUDE.md` for
-   the Logic Pro 16's connection quirk before blaming the capture.
+Reads issue the same LBA and command register writes over the same data bus, so
+a bus fault would have stalled them too; and the card was demonstrably healthy
+at the exact LBA it had just refused. That left the driver's handshake.
 
-**If the fix turns out to be software**, pace only the 8-bit path so other
-boards are unaffected — it belongs inside the existing
-`CONFIG_SYS_ATA_DATA_8BIT` block — and add it to the `ide.c` rebase note below.
-**If it turns out to be the PLD**, it is a `cfmanager` change in the hardware
-project, and this fork needs nothing.
+**After the fix, same hardware, only `ide.c` changed:**
 
-**Verify** over 10+ trials, and re-run the read tests as well: anything that
-touches the shared data path can regress reads, which are currently clean.
+| | before | after |
+|---|---|---|
+| `ide write` 1024 blocks | 0/10 complete | **50/50 complete** |
+| longest run before a stall | 704 blocks | no stall in 40,960 blocks |
+| sectors written + verified | 4592 (harvested from partial writes) | **42,064** |
+
+The 8-sector reproduce case passes either way — 8 blocks is short enough to
+clear a ~1-in-170 stall most times, which is exactly why the stall only showed
+up once writes were tested at length.
+
+Why it did not bite before the resistors is not fully settled — the 3.160 s
+figure in the throughput table is a complete 1024-block write on this same
+firmware. The likeliest reading is that it was always marginal: the race needs
+the card to be slow to assert BSY on some particular sector, which depends on
+its internal state, and several MB have been written to it since.
 
 ### Rebase note
 
@@ -408,7 +420,11 @@ touches the shared data path can regress reads, which are currently clean.
 rebasing through release tags. The changes are three `#if
 IS_ENABLED(CONFIG_SYS_ATA_DATA_8BIT)` blocks around the data-path functions,
 the `ide_set_8bit_mode()` helper and its call in `ide_ident()`, the `0xFF`
-no-device check in `ide_init_one()`, `.of_match` on `U_BOOT_DRIVER(ide)`, and
+no-device check in `ide_init_one()`, `.of_match` on `U_BOOT_DRIVER(ide)`, the
+`ide_wait_drq()` helper and its use in `ide_write()` and `ide_read()` (not
+board-specific — the existing code aborts a transfer whenever the device has not
+asserted BSY yet, so this is an upstream bug too and is queued for the list),
+and
 the `strlcpy()` size fix in `ide_probe()` (upstream passes `BLK_*_SIZE` where
 the buffers are `BLK_*_SIZE + 1`, which truncates a maximum-length string by
 one character - it printed `HDX 5.08` as `HDX 5.0`). That last one is an
@@ -1008,55 +1024,81 @@ card has no partition table at all this check says nothing; fall back to
 running the hardware project's `tests/cf_test/` and reading a sector it
 wrote.
 
-#### KNOWN BUG — the write path duplicates a byte, intermittently
+#### The write path duplicates a byte — mostly cured 2026-08-30
 
-**Do not trust CompactFlash writes from the SBC for anything that matters.**
-Measured 2026-08-29 on the SanDisk SDCFX-008G.
-
-Roughly **5–8% of written sectors come back corrupted**, always with the same
-signature: one byte is duplicated and the rest of the sector is shifted one
-byte later, losing the final byte. Two examples, source vs read-back:
+**Reduced ~3000x, not eliminated** — the signature is worth recognising because
+it still turns up. Roughly 5–8% of written sectors used to come back with one
+byte duplicated and the rest of the sector shifted one byte later, losing the
+final byte:
 
 ```
 fd 4c d0 81 2f 00 2d 40 ...   source
 fd 4c d0 d0 81 2f 00 2d ...   read back   (d0 duplicated)
-
-48 6e ff fc ...               source
-48 48 6e ff ...               read back   (48 duplicated)
 ```
 
-The offset moves from run to run and is *not* tied to a sector boundary, so it
-happens inside `ide_output_data()`'s 512-byte loop, not at the inter-sector
-turnaround. Reproduce with the 8-sector test above; expect 3–5 failures in 10.
+The offset moved from run to run and was never tied to a sector boundary, so it
+happened inside `ide_output_data()`'s 512-byte loop. Reads were always clean.
 
-**It is not caused by the `udelay()` change, and it is not new.** Both images
-were flashed and run through the identical 10-trial test on the same card:
+**The cause is signal integrity on the CF data lines and the cure was
+hardware** — 33R series termination resistors at the IDE connector. It was not
+a driver bug, and the `udelay()` change was not responsible (5/10 failures
+pre-`udelay`, 3/10 after). Since fitting them, **46,736 sectors have been
+written and verified with exactly one corrupt sector** — about 0.002%, or one
+every ~24 MB. The survivor looked like this, and two independent read-backs
+agreed, so the damage is on the card:
 
-| | failures / 10 runs of 8 sectors |
-|---|---|
-| pre-`udelay` (100 Hz tick floor) | 5 |
-| counter-based `udelay()` | 3 |
+```
+SRC: 02 82 00 00 | 00 ff 72 02 b2 8c 66 00 ...
+DST: 02 82 00 00 | 00 00 ff 72 02 b2 8c 66 ...   <- 00 duplicated, rest shifted
+```
 
-**Reads are clean.** 640 sectors read with zero mismatches, and an 8-sector
-read matches eight independent single-sector reads of the same LBAs byte for
-byte. This is write-only.
+Finding it needs volume: it will not show in a 10-trial 8-sector run, which is
+only 80 sectors — write and verify tens of thousands.
 
-**Why it went unnoticed.** The one thing the write path had been exercised by
-is formatting a card from the SBC — and that writes **almost entirely zeros**
-(the metadata region is blasted with a zero buffer). A duplicated byte inside a
-run of zeros is invisible: the sector is still all zeros. Only the eight
-content sectors carry non-zero data, and they are themselves mostly zeros. So a
-format can succeed, and Linux can mount the result, while the write path is
-this broken. A `cmp` round-trip through this driver does not catch it either —
-the corruption is on the card, so it reads back exactly as written.
+33R is already a conventional series-termination value, so the remaining
+event is unlikely to be cured by changing it. More promising: put the analyser
+on `/IOWR` and the data lines and look at the write cycle against ATA PIO
+mode 0's 600 ns minimum (the `cfmanager` GAL stretches to ~437 ns, which is
+still short); check whether the control lines want terminating too, not just
+data; and try a second card to see whether the residual rate is card-specific.
 
-**Prime suspect is write cycle timing, in `cfmanager` rather than in U-Boot.**
-The GAL stretches every CF cycle to ~437 ns (see the wiring table above), but
-ATA PIO mode 0 wants a **600 ns minimum cycle time**; a short cycle plus
-inadequate `/IOWR` recovery would let one write be latched twice, which is
-exactly the observed signature. Reads tolerating what writes do not is
-consistent with that. Verify with a scope or analyser on `/IOWR` before
-changing anything — this has not been confirmed.
+**Why it went unnoticed for so long.** The one thing the write path had been
+exercised by is formatting a card from the SBC — and that writes **almost
+entirely zeros** (the metadata region is blasted with a zero buffer). A
+duplicated byte inside a run of zeros is invisible: the sector is still all
+zeros. Only the eight content sectors carry non-zero data, and they are
+themselves mostly zeros. So a format could succeed, and Linux could mount the
+result, while the write path was this broken.
+
+#### Testing writes from a script — two traps that fake a clean run
+
+Both of these produced false PASSES on 2026-08-30 and cost two whole 10-trial
+runs before they were spotted. Anything that reports pass/fail counts from this
+board needs to defend against them.
+
+1. **The console drops characters.** Blasting a command at 115200 with no flow
+   control makes the 16 MHz 68030 lose bytes mid-line — `mw.l 0x40180000 0
+   0x20000` arrived as `mw.` and U-Boot answered with a usage message, leaving
+   the buffer unpoisoned. Send commands character by character (~1.5 ms apart)
+   and **verify the echoed first line matches what was sent**, retrying if not.
+   A stray `> ` continuation prompt, left by an unterminated quote, will also
+   hang any driver waiting for `=> `; send Ctrl-C first to resync.
+2. **`ide write` failures are silent unless you parse them.** It prints
+   `N blocks written: OK|ERROR`, and a partial write still returns a prompt. A
+   `cmp` round-trip then *passes* if an earlier trial happened to write the same
+   data to the same LBA. Always check the OK/ERROR line, **vary the source data
+   between trials**, poison the destination buffer before reading back, and use
+   a fresh LBA per trial so stale card contents cannot stand in for a write that
+   never happened.
+
+Also give the reader a long idle window: `ide write` and `ide read` go silent
+for seconds while they work, so a 0.6 s idle timeout will abandon the command
+mid-flight and desynchronise the stream. Wait for the prompt, not for silence.
+
+A useful trick for sensitivity: parse the `N blocks written` count and read back
+exactly those N blocks. A trial that stalls part-way still contributes N
+verified sectors, which is how 4,592 sectors were checked while every 1024-block
+write was still aborting.
 
 #### A scrambled model string does not mean a driver bug
 
