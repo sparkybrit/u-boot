@@ -150,6 +150,31 @@ static uchar ide_wait(int dev, ulong t)
 }
 
 /*
+ * Wait until DRQ is set, an error is reported, or timeout (in ms)
+ * Return last status
+ *
+ * Unlike ide_wait(), which returns as soon as BSY is clear - including when the
+ * device has not asserted it yet - this waits for the device to request the
+ * transfer, so that a late DRQ is not mistaken for a failed command.
+ */
+static uchar ide_wait_drq(int dev, ulong t)
+{
+	ulong delay = 10 * t;	/* poll every 100 us */
+	uchar c;
+
+	do {
+		c = ide_inb(dev, ATA_STATUS);
+		if (c & ATA_STAT_ERR)
+			break;
+		if (!(c & ATA_STAT_BUSY) && (c & ATA_STAT_DRQ))
+			break;
+		udelay(100);
+	} while (delay--);
+
+	return c;
+}
+
+/*
  * copy src to dest, skipping leading and trailing blanks and null
  * terminate the string
  * "len" is the size of available memory including the terminating '\0'
@@ -966,11 +991,11 @@ static ulong ide_read(struct udevice *dev, lbaint_t blknr, lbaint_t blkcnt,
 
 		if (pwrsave) {
 			/* may take up to 4 sec */
-			c = ide_wait(device, IDE_SPIN_UP_TIME_OUT);
+			c = ide_wait_drq(device, IDE_SPIN_UP_TIME_OUT);
 			pwrsave = 0;
 		} else {
 			/* can't take over 500 ms */
-			c = ide_wait(device, IDE_TIME_OUT);
+			c = ide_wait_drq(device, IDE_TIME_OUT);
 		}
 
 		if ((c & (ATA_STAT_DRQ | ATA_STAT_BUSY | ATA_STAT_ERR)) !=
@@ -1047,7 +1072,7 @@ static ulong ide_write(struct udevice *dev, lbaint_t blknr, lbaint_t blkcnt,
 		udelay(50);
 
 		/* can't take over 500 ms */
-		c = ide_wait(device, IDE_TIME_OUT);
+		c = ide_wait_drq(device, IDE_TIME_OUT);
 
 		if ((c & (ATA_STAT_DRQ | ATA_STAT_BUSY | ATA_STAT_ERR)) !=
 		    ATA_STAT_DRQ) {
