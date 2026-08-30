@@ -855,7 +855,16 @@ The whole image must fit the 512 KB device (currently ~283 KB).
   disabled only the *last* character of the serial number survives, which
   looks exactly like corrupted IDENTIFY data. Turn wrapping on before reading
   anything into a diagnosis.
-- To reboot without reflashing, send U-Boot's own `reset` command.
+- **`reset` at the prompt does not reboot this board.** It returns to the
+  prompt having done nothing — verified twice on 2026-08-30. The only reliable
+  reboot is the `/RESET` pulse `nvram_write` issues after a successful write,
+  so getting a cold-boot log means reflashing (even with an unchanged image).
+  Start the console capture *before* the flash, or the boot log is missed.
+- **Do not swap the CF card with the power on.** A hot insert put the board
+  into a continuous `Bogus External Interrupt Vector 144` storm, and NVRAM
+  reads through the programmer went unstable — three reads of the same KB
+  differing — because the card was contending for the bus. Power down, swap,
+  power up.
 
 ## Testing
 
@@ -929,6 +938,32 @@ Bus 0: OK
 socket, or `/DISKCS` not reaching the card. `8-bit transfer mode rejected`
 means the card refused `SET FEATURES 0x01`; that card cannot be used on this
 board without going to 16-bit mode in `cfmanager`.
+
+#### Open bug — 8-bit mode intermittently refused at cold boot
+
+Seen 2026-08-30 on a SanDisk `SDCFXPS-032G`:
+
+```
+Bus 0: OK
+  Device 0: 8-bit transfer mode rejected (status 0x6b, error 0x40)
+not available
+```
+
+When it bites the card is unusable for the whole session. It is **specific to
+cold boot** — 0 out of 30 warm `ide reset` re-probes reproduced it, and an
+`ide reset` afterwards brings the card up fine.
+
+The status/error pair says this is not a card politely declining. A device
+that does not support 8-bit PIO answers status `0x51` (`DRDY|DSC|ERR`) with
+error `0x04` (`ABRT`). Here status `0x6b` is `DRDY|DF|DRQ|IDX|ERR` and error
+`0x40` is `UNC` — `DRQ` set after a *non-data* command, plus device fault and
+an uncorrectable-data error, is incoherent. That is what a card still running
+its power-on self-test looks like when probed too early, and `ide_init_one()`
+has no settle delay before `ide_ident()` issues `SET FEATURES`.
+
+Warm re-probing being clean is what rules out marginal signalling: a bus
+problem would show up warm too. The likely fix is a settle delay, or retrying
+`SET FEATURES` once, before declaring the card unusable.
 
 Then, at the prompt:
 
