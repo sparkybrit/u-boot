@@ -544,6 +544,44 @@ single-patch series automatically, so the `EDITME` placeholder never goes out.
 `u-boot@lists.denx.de` is out of date; `get_maintainer.pl` reports the current
 one.
 
+#### Commit-message hygiene — what checkpatch does and does not see
+
+`scripts/checkpatch.pl` checks the **commit message** as well as the diff, but
+only when you give it something that contains one:
+
+```bash
+scripts/checkpatch.pl --strict -g HEAD            # checks message + diff
+git format-patch -1 --stdout HEAD | scripts/checkpatch.pl --strict -
+scripts/checkpatch.pl --strict some.diff          # diff ONLY - message unchecked
+```
+
+Running it on a bare `git diff` file reports "no obvious style problems" while
+silently skipping every message check. That hid two defects in the
+`ide_wait_drq()` commit until it was re-run with `-g`:
+
+- **Wrap the body at 75 characters.** Anything longer earns
+  `Prefer a maximum 75 chars per line (possible unwrapped commit description?)`.
+- **Only seven signature tags are recognised** — `Acked-by`, `Co-developed-by`,
+  `Reported-by`, `Reviewed-by`, `Signed-off-by`, `Suggested-by`, `Tested-by`.
+  Anything else is `Non-standard signature`. Note `Co-developed-by:` is not a
+  free substitute: the kernel convention requires a matching `Signed-off-by:`
+  from that same person, so using it without one trades a warning for an error.
+  Drop non-standard trailers from the version that goes to the list.
+
+**`git commit --amend -F msg` silently drops `Signed-off-by:`** unless you also
+pass `-s`, because the trailer lives in the message you just replaced. Always
+re-check with `git log -1 --format='%(trailers)'` after rewording — the DCO
+assertion is the one thing that must not go missing.
+
+To reword a commit that is not HEAD without interactive rebase:
+
+```bash
+git branch backup-pre-reword <branch>          # safety net
+git checkout <sha> && git commit --amend -s -F newmsg
+git rebase --onto $(git rev-parse HEAD) <sha> <branch>
+git diff backup-pre-reword <branch>            # must be empty: messages only
+```
+
 #### Sending
 
 1. Create a Gmail App Password at `myaccount.google.com/apppasswords`
