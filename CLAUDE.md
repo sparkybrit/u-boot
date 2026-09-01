@@ -232,7 +232,7 @@ clearing `CONFIG_SYS_ATA_DATA_8BIT`.
 Writing gained about as much: 512 KB in **2.87–3.01 s** (~170 KB/s), against an
 old filesystem-level figure of ~18 KB/s (2 MB of metadata in 112 s). Long writes
 now run to completion — the `no IRQ` stall that used to abort them is fixed —
-and no corruption has been seen in 21 million sectors since; see below.
+and no corruption has been seen in 28 million sectors since; see below.
 
 ### A real time source for `udelay()`
 
@@ -347,18 +347,18 @@ soak testing has since contradicted it decisively:
 
 | card | sectors written, read back and compared | corrupt |
 |---|---|---|
-| SanDisk SDCFX-008G (3 runs) | 9,664,512 | **0** |
+| SanDisk SDCFX-008G (4 runs) | 17,059,840 | **0** |
 | SanDisk `SDCFXPS-032G` (12 h) | 11,395,072 | **0** |
-| **total** | **21,059,584** | **0** |
+| **total** | **28,454,912** | **0** |
 
-On the SanDisk alone that bounds the rate below **3.1e-07** per sector at 95%
-confidence — 69x below the retracted figure. At the retracted rate those runs
-would have produced over 200 corrupt sectors.
+On the SanDisk alone that bounds the rate below **1.8e-07** per sector at 95%
+confidence — over 100x below the retracted figure. At the retracted rate those
+runs would have produced more than 350 corrupt sectors.
 
 > **Treat writes as sound, but note the one unexplained event.** It was real —
 > verified on the card by two independent read-backs, with the classic
 > duplicate-and-shift signature — so something produced it. It has not
-> reproduced in 21 million sectors. If it ever returns, the signature below is
+> reproduced in 28 million sectors. If it ever returns, the signature below is
 > how to recognise it. A brownout is now a live candidate for what caused it:
 > see the rail measurement under the reset section below.
 
@@ -416,12 +416,12 @@ at the exact LBA it had just refused. That left the driver's handshake.
 | | before | after |
 |---|---|---|
 | `ide write` 1024 blocks | 0/10 complete | **50/50 complete** |
-| longest run before a stall | 704 blocks | **no stall in 21,059,584 blocks** |
-| sectors written + verified | 4592 (harvested from partial writes) | **21,059,584** |
+| longest run before a stall | 704 blocks | **no stall in 28,454,912 blocks** |
+| sectors written + verified | 4592 (harvested from partial writes) | **28,454,912** |
 
-The soak figure is the strong one: **zero `no IRQ` stalls in 21 million blocks**
+The soak figure is the strong one: **zero `no IRQ` stalls in 28 million blocks**
 across two cards. At the pre-fix rate of one per 170 blocks those runs would
-have hit roughly 124,000 aborts.
+have hit roughly 167,000 aborts.
 
 The 8-sector reproduce case passes either way — 8 blocks is short enough to
 clear a ~1-in-170 stall most times, which is exactly why the stall only showed
@@ -433,28 +433,52 @@ firmware. The likeliest reading is that it was always marginal: the race needs
 the card to be slow to assert BSY on some particular sector, which depends on
 its internal state, and several MB have been written to it since.
 
-### Open — the board may reboot under sustained CF writes
+### Open — the board reboots under sustained CF writes, rarely
 
-**Suspected, not confirmed. Seen 2026-08-31 during soak testing.** This is not
-corruption; every sector written in these runs still verified.
+**Confirmed 2026-09-01, and rare.** This is not corruption; every sector
+written in these runs still verified.
 
-Some `ide write` commands came back with what looks like U-Boot's **boot-time**
-CF probe output — the `Bus 0: OK` / `Device 0: Model: …` block that
-`board_late_init()` prints, ending at a fresh `=> ` prompt. The command echoed
-first and then that appeared, which is what a reset part-way through a write
-would look like. The soak issues no `ide info` or `ide reset`, and `ide device 0`
-(the only other producer of similar text) ends with `… is now current device`,
-which was absent.
+A soak instrumented to check every reply for U-Boot's banner caught one
+outright. The write command echoes, U-Boot prints its transfer line, and then
+the banner appears part-way through:
 
-**It is card-specific**, which is the strongest clue:
+```
+ide write 0x40100000 0x2a6c00 0x400
+ide write: device 0 block # 2780160, count 1024 ...
+U-Boot 2026.07-00042-g8ca11aba965b-dirty (Sep 01 2026 - 07:40:12 +0100)
+CPU:   Motorola MC68030
+...
+```
 
-| card | sectors | such events |
+**Rate: 1 reboot in 7,395,328 sectors** over a 12 h run — the only run so far
+with detection in it.
+
+> **That is one event, and one event is not a rate.** The Poisson interval on
+> a single observation spans roughly 1-in-400,000 to 1-in-90,000,000 sectors.
+> What is established is that the reboot is real and rare, not how rare. This
+> is the same trap that produced the retracted corruption figure above.
+
+**An earlier claim here was wrong.** This section previously reported "24 such
+events in ~9.7 M sectors" on the SanDisk, inferred by assuming every
+`unparsable write reply` in the uninstrumented runs was a reset. Proper
+detection puts it about **18x rarer** than that, so most of those replies were
+something else. Do not infer a reboot from a truncated reply; test for the
+banner.
+
+**Run 3 and run 4 differ in a way nothing explains.** Same card, same wiring,
+same rail, same duration, nothing changed physically:
+
+| | run 3 (overnight) | run 4 (daytime) |
 |---|---|---|
-| SanDisk SDCFX-008G | ~9,700,000 | 24 |
-| SanDisk `SDCFXPS-032G` | 11,395,072 | **0** |
+| sectors | 7,217,152 | 7,395,328 |
+| `unparsable`/other errors | 13 | **0** |
+| slow writes >10 s | 3 (max 90.7 s) | **0** (max 6.2 s) |
+| confirmed reboots | not instrumented | 1 |
 
-The second card ran 12 hours with a *tighter* console timeout and produced none,
-so this is neither the harness nor the driver.
+**This matters for testing any fix:** a single clean run proves nothing,
+because run 4 was already clean without any change. A power-path fix has to be
+measured against run 3's conditions, not run 4's, and until what varies between
+them is understood that is hard to arrange deliberately.
 
 **Leading explanation: the rail is at the supervisor's trip point.** Measured
 2026-09-01: the supervisor trips at **4.75 V**, and a panel meter on the
@@ -1237,7 +1261,7 @@ happened inside `ide_output_data()`'s 512-byte loop. Reads were always clean.
 **The cause is signal integrity on the CF data lines and the cure was
 hardware** — 33R series termination resistors at the IDE connector. It was not
 a driver bug, and the `udelay()` change was not responsible (5/10 failures
-pre-`udelay`, 3/10 after). Since fitting them, **21,059,584 sectors have been
+pre-`udelay`, 3/10 after). Since fitting them, **28,454,912 sectors have been
 written, read back and compared with exactly one corrupt sector**, and that one
 came in the first few thousand. It looked like this, and two independent
 read-backs agreed, so the damage was on the card, not in the read path:
@@ -1254,8 +1278,9 @@ sectors and can say nothing about a rate below a few percent — the two clean
 actually supports rather than the point estimate.
 
 That mistake is worth naming: a single corruption event was written up here as
-a rate of "1 in 46,736", and 21 million sectors later it is bounded below
-3.1e-07. One event is not a rate.
+a rate of "1 in 46,736", and 28 million sectors later it is bounded below
+1.8e-07. One event is not a rate. The same trap caught the reboot count in the
+open section below, where 24 inferred resets turned out to be one measured one.
 
 **Why it went unnoticed for so long.** The one thing the write path had been
 exercised by is formatting a card from the SBC — and that writes **almost
