@@ -969,11 +969,17 @@ The whole image must fit the 512 KB device (currently ~283 KB).
   disabled only the *last* character of the serial number survives, which
   looks exactly like corrupted IDENTIFY data. Turn wrapping on before reading
   anything into a diagnosis.
-- **`reset` at the prompt does not reboot this board.** It returns to the
-  prompt having done nothing — verified twice on 2026-08-30. The only reliable
-  reboot is the `/RESET` pulse `nvram_write` issues after a successful write,
-  so getting a cold-boot log means reflashing (even with an unchanged image).
-  Start the console capture *before* the flash, or the boot log is missed.
+- **`reset` reboots the board** — implemented 2026-09-01. It was a stub until
+  then, returning to the prompt having done nothing, so older notes saying a
+  reboot needs a reflash are out of date. It prints `resetting ...` and comes
+  back through the full boot. Start the console capture *before* sending it, or
+  the boot log is missed — a capture that opens the port and then flushes will
+  throw the banner away and the board will look dead.
+- **`reset` pulses /RESET to the CompactFlash card, `ide reset` does not.**
+  That makes `reset` a far better proxy for a cold boot, and the only way to
+  chase the intermittent 8-bit-mode rejection below without power cycling.
+- The `/RESET` pulse `nvram_write` issues after a successful write still works
+  and is the only option if the board is wedged past the console.
 - **Do not swap the CF card with the power on.** A hot insert put the board
   into a continuous `Bogus External Interrupt Vector 144` storm, and NVRAM
   reads through the programmer went unstable — three reads of the same KB
