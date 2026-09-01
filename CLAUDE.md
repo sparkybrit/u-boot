@@ -232,8 +232,7 @@ clearing `CONFIG_SYS_ATA_DATA_8BIT`.
 Writing gained about as much: 512 KB in **2.87–3.01 s** (~170 KB/s), against an
 old filesystem-level figure of ~18 KB/s (2 MB of metadata in 112 s). Long writes
 now run to completion — the `no IRQ` stall that used to abort them is fixed —
-but a residual ~0.002% sector corruption remains; see below before trusting
-writes with real data.
+and no corruption has been seen in 21 million sectors since; see below.
 
 ### A real time source for `udelay()`
 
@@ -325,30 +324,45 @@ signal integrity on the CF data lines and largely cured by termination
 resistors; making `udelay()` honest also exposed a latent driver bug in the
 write handshake, since fixed. See the next section for both.
 
-### The write path — corruption ~3000x rarer, stall fixed
+### The write path — corruption fixed, stall fixed
 
-**Worked 2026-08-30.** Two independent faults were stacked on top of one
-another, and neither was quite where the 2026-08-29 notes suspected. One is
-fixed outright; the other is enormously improved but **not** gone.
+**Worked 2026-08-30, confirmed by soak testing 2026-08-31.** Two independent
+faults were stacked on top of one another, and neither was quite where the
+2026-08-29 notes suspected. Both are now fixed — one in hardware, one in this
+driver.
 
-**1. Byte-duplication corruption — hugely reduced by a hardware change, not
-eliminated.** ~5–8% of written sectors used to come back with one byte
-duplicated and the rest of the sector shifted a byte later. Fitting **33R
-series termination resistors on the data lines at the IDE connector** took that
-down to **1 corrupt sector in 46,736 written and verified** — about
-**0.002%**, a ~3000x reduction, but still a real failure. Nothing in this fork
-changed for it. The old suspicion — `cfmanager`'s `/IOWR` timing — was the right
-neighbourhood in that it is signal integrity on the CF bus, but termination
-rather than a PLD change carried almost all of it.
+**1. Byte-duplication corruption — a hardware fix.** ~5–8% of written sectors
+used to come back with one byte duplicated and the rest of the sector shifted a
+byte later. Fitting **33R series termination resistors on the data lines at the
+IDE connector** cured it. Nothing in this fork changed for it. The old suspicion
+— `cfmanager`'s `/IOWR` timing — was the right neighbourhood in that it is
+signal integrity on the CF bus, but termination rather than a PLD change is what
+fixed it.
 
-> **Writes are still not sound for bulk data.** At this rate a full 8 GB card
-> would take roughly 400 bad sectors, and one appears about every 24 MB. Verify
-> anything that matters, or chase the residual — the remaining event has the
-> identical duplicate-and-shift signature, so it is the same mechanism at a
-> lower rate, not a different fault.
+**Exactly one corrupt sector has ever been seen since**, on 2026-08-30, in the
+first few thousand sectors written after the resistors went on. That single
+event was briefly recorded here as a rate of "1 in 46,736" — **that was wrong**,
+and the figure is retracted. It was one event with enormous error bars, and
+soak testing has since contradicted it decisively:
+
+| card | sectors written, read back and compared | corrupt |
+|---|---|---|
+| SanDisk SDCFX-008G (3 runs) | 9,664,512 | **0** |
+| SanDisk `SDCFXPS-032G` (12 h) | 11,395,072 | **0** |
+| **total** | **21,059,584** | **0** |
+
+On the SanDisk alone that bounds the rate below **3.1e-07** per sector at 95%
+confidence — 69x below the retracted figure. At the retracted rate those runs
+would have produced over 200 corrupt sectors.
+
+> **Treat writes as sound, but note the one unexplained event.** It was real —
+> verified on the card by two independent read-backs, with the classic
+> duplicate-and-shift signature — so something produced it. It has not
+> reproduced in 21 million sectors. If it ever returns, the signature below is
+> how to recognise it.
 
 **2. `Error (no IRQ) ... status 0x50` on long writes — a driver fix.** With the
-corruption largely out of the way, streaming writes turned out to abort after 50–700 blocks,
+corruption out of the way, streaming writes turned out to abort after 50–700 blocks,
 about one stall per 170 blocks. `ide_write()` issues `ATA_CMD_PIO_WRITE` per
 block, waits `udelay(50)`, then requires DRQ — but `ide_wait()` only spins
 *while BSY is set*, so a card that has not asserted BSY yet, being still busy
@@ -401,8 +415,12 @@ at the exact LBA it had just refused. That left the driver's handshake.
 | | before | after |
 |---|---|---|
 | `ide write` 1024 blocks | 0/10 complete | **50/50 complete** |
-| longest run before a stall | 704 blocks | no stall in 40,960 blocks |
-| sectors written + verified | 4592 (harvested from partial writes) | **42,064** |
+| longest run before a stall | 704 blocks | **no stall in 21,059,584 blocks** |
+| sectors written + verified | 4592 (harvested from partial writes) | **21,059,584** |
+
+The soak figure is the strong one: **zero `no IRQ` stalls in 21 million blocks**
+across two cards. At the pre-fix rate of one per 170 blocks those runs would
+have hit roughly 124,000 aborts.
 
 The 8-sector reproduce case passes either way — 8 blocks is short enough to
 clear a ~1-in-170 stall most times, which is exactly why the stall only showed
@@ -413,6 +431,64 @@ figure in the throughput table is a complete 1024-block write on this same
 firmware. The likeliest reading is that it was always marginal: the race needs
 the card to be slow to assert BSY on some particular sector, which depends on
 its internal state, and several MB have been written to it since.
+
+### Open — the board may reboot under sustained CF writes
+
+**Suspected, not confirmed. Seen 2026-08-31 during soak testing.** This is not
+corruption; every sector written in these runs still verified.
+
+Some `ide write` commands came back with what looks like U-Boot's **boot-time**
+CF probe output — the `Bus 0: OK` / `Device 0: Model: …` block that
+`board_late_init()` prints, ending at a fresh `=> ` prompt. The command echoed
+first and then that appeared, which is what a reset part-way through a write
+would look like. The soak issues no `ide info` or `ide reset`, and `ide device 0`
+(the only other producer of similar text) ends with `… is now current device`,
+which was absent.
+
+**It is card-specific**, which is the strongest clue:
+
+| card | sectors | such events |
+|---|---|---|
+| SanDisk SDCFX-008G | ~9,700,000 | 24 |
+| SanDisk `SDCFXPS-032G` | 11,395,072 | **0** |
+
+The second card ran 12 hours with a *tighter* console timeout and produced none,
+so this is neither the harness nor the driver.
+
+**Leading hypothesis: the power supervisor.** It trips at 4.75 V and the rail
+idles around 4.85 V — roughly 100 mV, about 2%, of margin. A CF write burst is
+the peakiest load on the board, and one card drawing more than another is
+exactly the observed pattern. The Teensy programmer is on the same rail, adding
+both load and bus capacitance.
+
+**Why it is not confirmed:** the harness logged only the last 220 bytes of each
+reply, so U-Boot's banner — which would settle it outright — was truncated away.
+Grepping the logs for `U-Boot 2026` finds nothing, and that proves nothing.
+A rerun must keep the whole transcript and test for the banner explicitly.
+
+**To settle it:** analog probe on the 5 V rail *at the CF socket* plus a digital
+channel on `/RESET`, triggered on `/RESET` falling. A voltmeter reading 4.85 V
+cannot see a microsecond transient. Cheapest first move is to unplug the Teensy
+and rerun — it drops rail load and bus loading together — after confirming the
+4k7 pull-ups on `/BR` and `/BGACK` (see the CPU sheet in the hardware project).
+
+### Open — a slow region on the reference card
+
+Writes that normally take 3.1 s for 1024 blocks occasionally take far longer,
+and the slow LBAs repeat across independent runs:
+
+| run | LBA | duration |
+|---|---|---|
+| 2 | `0x1a7c00` | 47 s |
+| 3 | `0x1a8c00` | 12.6 s |
+| 3 | `0x1ac400` | 10.2 s |
+| 3 | `0x1ae800` | — |
+| 3 | `0x1e4c00` | 90.7 s |
+
+`0x1a7c00`–`0x1ae800` recurring across runs looks like a genuinely weak region
+rather than routine garbage collection. Note no U-Boot timeout can cover a 90 s
+write — `IDE_TIME_OUT` is 2 s — so a card that disappears for that long will
+fail whatever the driver does.
 
 ### Rebase note
 
@@ -1097,12 +1173,12 @@ card has no partition table at all this check says nothing; fall back to
 running the hardware project's `tests/cf_test/` and reading a sector it
 wrote.
 
-#### The write path duplicates a byte — mostly cured 2026-08-30
+#### The write path used to duplicate a byte — fixed 2026-08-30
 
-**Reduced ~3000x, not eliminated** — the signature is worth recognising because
-it still turns up. Roughly 5–8% of written sectors used to come back with one
-byte duplicated and the rest of the sector shifted one byte later, losing the
-final byte:
+**Fixed**, but the signature is kept here because it is distinctive and one
+unexplained event did occur after the fix. Roughly 5–8% of written sectors used
+to come back with one byte duplicated and the rest of the sector shifted one
+byte later, losing the final byte:
 
 ```
 fd 4c d0 81 2f 00 2d 40 ...   source
@@ -1115,25 +1191,25 @@ happened inside `ide_output_data()`'s 512-byte loop. Reads were always clean.
 **The cause is signal integrity on the CF data lines and the cure was
 hardware** — 33R series termination resistors at the IDE connector. It was not
 a driver bug, and the `udelay()` change was not responsible (5/10 failures
-pre-`udelay`, 3/10 after). Since fitting them, **46,736 sectors have been
-written and verified with exactly one corrupt sector** — about 0.002%, or one
-every ~24 MB. The survivor looked like this, and two independent read-backs
-agreed, so the damage is on the card:
+pre-`udelay`, 3/10 after). Since fitting them, **21,059,584 sectors have been
+written, read back and compared with exactly one corrupt sector**, and that one
+came in the first few thousand. It looked like this, and two independent
+read-backs agreed, so the damage was on the card, not in the read path:
 
 ```
 SRC: 02 82 00 00 | 00 ff 72 02 b2 8c 66 00 ...
 DST: 02 82 00 00 | 00 00 ff 72 02 b2 8c 66 ...   <- 00 duplicated, rest shifted
 ```
 
-Finding it needs volume: it will not show in a 10-trial 8-sector run, which is
-only 80 sectors — write and verify tens of thousands.
+**Judging a change here needs volume.** A 10-trial 8-sector run is only 80
+sectors and can say nothing about a rate below a few percent — the two clean
+10-trial runs that first suggested "fixed" were far too small to mean it. Use
+`soak.py`-style runs of millions of sectors, and state the bound the sample
+actually supports rather than the point estimate.
 
-33R is already a conventional series-termination value, so the remaining
-event is unlikely to be cured by changing it. More promising: put the analyser
-on `/IOWR` and the data lines and look at the write cycle against ATA PIO
-mode 0's 600 ns minimum (the `cfmanager` GAL stretches to ~437 ns, which is
-still short); check whether the control lines want terminating too, not just
-data; and try a second card to see whether the residual rate is card-specific.
+That mistake is worth naming: a single corruption event was written up here as
+a rate of "1 in 46,736", and 21 million sectors later it is bounded below
+3.1e-07. One event is not a rate.
 
 **Why it went unnoticed for so long.** The one thing the write path had been
 exercised by is formatting a card from the SBC — and that writes **almost
