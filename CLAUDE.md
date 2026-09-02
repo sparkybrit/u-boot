@@ -359,8 +359,9 @@ runs would have produced more than 350 corrupt sectors.
 > verified on the card by two independent read-backs, with the classic
 > duplicate-and-shift signature — so something produced it. It has not
 > reproduced in 28 million sectors. If it ever returns, the signature below is
-> how to recognise it. A brownout is now a live candidate for what caused it:
-> see the rail measurement under the reset section below.
+> how to recognise it. A brownout was briefly a candidate, on the strength of
+> a rail reading that turned out to be a miscalibrated meter — see the reset
+> section below. Nothing currently explains it.
 
 **2. `Error (no IRQ) ... status 0x50` on long writes — a driver fix.** With the
 corruption out of the way, streaming writes turned out to abort after 50–700 blocks,
@@ -480,44 +481,44 @@ because run 4 was already clean without any change. A power-path fix has to be
 measured against run 3's conditions, not run 4's, and until what varies between
 them is understood that is hard to arrange deliberately.
 
-**Leading explanation: the rail is at the supervisor's trip point.** Measured
-2026-09-01: the supervisor trips at **4.75 V**, and a panel meter on the
-breadboard **at the IDE adapter reads 4.75 V** — on the threshold, with no
-margin at all. The same rail reads about 4.85 V further back, so roughly
-**100 mV is lost as IR drop** across breadboard contacts and jumper wires, and
-that drop scales with current.
+**The power-supply explanation is currently unsupported.** A reading of
+4.75 V at the IDE adapter on 2026-09-01 — exactly the supervisor's trip point —
+briefly made this look solved. **That reading was wrong**: the in-circuit panel
+meter was miscalibrated and reading low. Checked against a multimeter and
+retuned on 2026-09-02, the real picture is healthy:
 
-That puts the CF card at the far end of the power path *and* makes it the
-largest transient load on the board — the worst of both. A write burst then
-takes the local rail under the threshold. One card drawing more than another is
-exactly the observed pattern, and the Teensy on the same rail adds load on top.
+| | |
+|---|---|
+| six rails across five breadboards | 4.90–4.94 V |
+| spread end to end | **40 mV** (4.94 V nearest the supply, 4.90 V furthest) |
+| margin to the 4.75 V trip | **150–190 mV**, about 3% |
+| average draw | 450 mA on a 1 A regulator — **45% load** |
+| regulator temperature | warm, not hot |
 
-**This may account for more than the resets:**
+40 mV across five chained breadboards at 450 mA implies about **89 mΩ** of
+total path resistance, so even a 200 mA transient step costs only ~18 mV. The
+distribution is not the problem at DC, the regulator is neither current-limited
+nor thermally folding back, and **a larger regulator is not indicated** — it
+would raise a ceiling the board is nowhere near.
 
-- The slow writes below could be the card dipping under spec mid-program and
-  retrying internally, which would look exactly like a weak region.
-- CF is specced 5 V ±10%, so **4.5 V minimum**. At 4.75 V steady a write
-  transient plausibly goes under that, and a byte latched during a brownout is
-  a natural cause of the duplicate-and-shift corruption signature.
-- The 33R series resistors do not only damp reflections, they also limit the
-  switching current the data bus draws. Some of the improvement attributed to
-  signal integrity may have been reduced supply transients.
+None of that *disproves* a brownout: a meter shows an average and cannot see a
+microsecond dip, and reaching 4.75 V from 4.91 V during a write burst is not a
+big excursion. But there is no longer any evidence *for* it, and the one
+confirmed reset is unexplained.
 
-**Caveats before acting on the number.** These panel meters are often several
-percent out and uncalibrated, and they draw from the rail they measure. More
-importantly a meter displays an average and **cannot see a microsecond
-transient**, so a comfortable reading would not exonerate the rail. And it is
-not established where the supervisor senses: if it senses near the regulator at
-4.85 V it may not be tripping at all, and the resets would be the CF card or CPU
-browning out directly — same remedy, different reporter.
+**To make progress this needs a transient capture, not more meter readings** —
+an analog probe on the rail *at the CF adapter* plus a digital channel on
+`/RESET`, triggered on the reset edge. Failing that, bulk plus ceramic
+decoupling at the CF socket is the cheap speculative fix, since local energy
+storage is what actually supplies a burst while the regulator's loop catches up.
 
-**Remedies, in order.** Fix the power path first: feed the IDE adapter directly
-from the supply with proper wire instead of through breadboard rails and
-jumpers — that is the actual defect. Then bulk capacitance at the CF socket
-(100 µF plus a 0.1 µF ceramic) so the write burst is sourced locally. Then take
-the Teensy off the rail, which also removes the bus loading noted above. Resist
-simply raising the supply: with 250 mV of drop already, cranking it to fix the
-far end pushes the CPU end toward the top of its tolerance.
+> **Three claims in this investigation went into these notes as measured fact
+> and were later retracted**, each one a single unvalidated number treated as
+> settled: corruption at "1 in 46,736" (bounded 100x lower over 28 M sectors),
+> "24 reboots per ~9.7 M sectors" (1 in 7.4 M once instrumented), and this
+> 4.75 V rail (meter miscalibrated). The caveat about panel-meter accuracy was
+> even written down here before being ignored. State what a measurement can
+> support, and validate the instrument before building on it.
 
 **Why it is not confirmed:** the harness logged only the last 220 bytes of each
 reply, so U-Boot's banner — which would settle it outright — was truncated away.
@@ -548,11 +549,14 @@ rather than routine garbage collection. Note no U-Boot timeout can cover a 90 s
 write — `IDE_TIME_OUT` is 2 s — so a card that disappears for that long will
 fail whatever the driver does.
 
-**But see the rail measurement above before concluding the card is at fault.**
 A card browning out mid-program and retrying internally would produce the same
-signature, and the repeatability by LBA could simply be where the workload
-happens to put its heaviest bursts. Re-measure this after the power path is
-fixed; if the slow LBAs move or vanish it was never the flash.
+signature, and the repeatability by LBA could simply be where the workload puts
+its heaviest bursts — but the rail reading that made that plausible was a
+miscalibrated meter, so treat it as an open possibility rather than a lead.
+
+Note also that run 4 saw **no slow writes at all** (slowest 6.2 s) over 12 hours
+on the same card, where run 3 saw three including one of 90.7 s. Whatever drives
+this is not simply a bad area of flash, or it would show every pass.
 
 ### Rebase note
 
