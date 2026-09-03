@@ -232,7 +232,7 @@ clearing `CONFIG_SYS_ATA_DATA_8BIT`.
 Writing gained about as much: 512 KB in **2.87–3.01 s** (~170 KB/s), against an
 old filesystem-level figure of ~18 KB/s (2 MB of metadata in 112 s). Long writes
 now run to completion — the `no IRQ` stall that used to abort them is fixed —
-and no corruption has been seen in 28 million sectors since; see below.
+and no corruption has been seen in 40 million sectors since; see below.
 
 ### A real time source for `udelay()`
 
@@ -348,17 +348,19 @@ soak testing has since contradicted it decisively:
 | card | sectors written, read back and compared | corrupt |
 |---|---|---|
 | SanDisk SDCFX-008G (4 runs) | 17,059,840 | **0** |
-| SanDisk `SDCFXPS-032G` (12 h) | 11,395,072 | **0** |
-| **total** | **28,454,912** | **0** |
+| `SDCFXPS-032G` (12 h) | 11,395,072 | **0** |
+| `SDCFXPS-064G` (12 h) | 11,369,472 | **0** |
+| **total** | **39,824,384** (20.4 GB) | **0** |
 
-On the SanDisk alone that bounds the rate below **1.8e-07** per sector at 95%
-confidence — over 100x below the retracted figure. At the retracted rate those
-runs would have produced more than 350 corrupt sectors.
+Across all three cards that bounds the rate below **7.5e-08** per sector at 95%
+confidence; on the reference SanDisk alone, below 1.8e-07 — over 100x below the
+retracted figure. At the retracted rate those runs would have produced more than
+850 corrupt sectors.
 
 > **Treat writes as sound, but note the one unexplained event.** It was real —
 > verified on the card by two independent read-backs, with the classic
 > duplicate-and-shift signature — so something produced it. It has not
-> reproduced in 28 million sectors. If it ever returns, the signature below is
+> reproduced in 40 million sectors. If it ever returns, the signature below is
 > how to recognise it. A brownout was briefly a candidate, on the strength of
 > a rail reading that turned out to be a miscalibrated meter — see the reset
 > section below. Nothing currently explains it.
@@ -417,12 +419,12 @@ at the exact LBA it had just refused. That left the driver's handshake.
 | | before | after |
 |---|---|---|
 | `ide write` 1024 blocks | 0/10 complete | **50/50 complete** |
-| longest run before a stall | 704 blocks | **no stall in 28,454,912 blocks** |
-| sectors written + verified | 4592 (harvested from partial writes) | **28,454,912** |
+| longest run before a stall | 704 blocks | **no stall in 39,824,384 blocks** |
+| sectors written + verified | 4592 (harvested from partial writes) | **39,824,384** |
 
-The soak figure is the strong one: **zero `no IRQ` stalls in 28 million blocks**
-across two cards. At the pre-fix rate of one per 170 blocks those runs would
-have hit roughly 167,000 aborts.
+The soak figure is the strong one: **zero `no IRQ` stalls in 40 million blocks**
+across three cards. At the pre-fix rate of one per 170 blocks those runs would
+have hit roughly 234,000 aborts.
 
 The 8-sector reproduce case passes either way — 8 blocks is short enough to
 clear a ~1-in-170 stall most times, which is exactly why the stall only showed
@@ -458,6 +460,26 @@ with detection in it.
 > a single observation spans roughly 1-in-400,000 to 1-in-90,000,000 sectors.
 > What is established is that the reboot is real and rare, not how rare. This
 > is the same trap that produced the retracted corruption figure above.
+
+**Swapping cards does not settle it either.** A 12 h instrumented run on a
+third card, `SDCFXPS-064G`, produced 11,369,472 sectors with **zero** events of
+any kind — no reboots, corruption, stalls, errors or slow writes.
+
+That is *not* evidence the card is better. At the SanDisk's measured rate the
+expected count over that run is **1.52**, so seeing zero anyway has probability
+**0.22** — the two cards' plausible ranges overlap almost entirely. Comparing
+cards needs several events, which means either far longer runs or a workload
+built to provoke resets rather than one that merely might.
+
+**What the cards genuinely differ in is latency, not resets:**
+
+| card | typical 1024-block write | worst seen | slow writes >10 s |
+|---|---|---|---|
+| SanDisk SDCFX-008G | 3.1 s | **90.7 s** | 3 in 7.2 M sectors |
+| `SDCFXPS-064G` | 1.1–2.1 s | 2.1 s | **0 in 11.4 M** |
+
+That difference is cleanly measured, unlike the reset rate. If a long write
+latency matters to something built on this board, the card choice is real.
 
 **An earlier claim here was wrong.** This section previously reported "24 such
 events in ~9.7 M sectors" on the SanDisk, inferred by assuming every
@@ -1265,7 +1287,7 @@ happened inside `ide_output_data()`'s 512-byte loop. Reads were always clean.
 **The cause is signal integrity on the CF data lines and the cure was
 hardware** — 33R series termination resistors at the IDE connector. It was not
 a driver bug, and the `udelay()` change was not responsible (5/10 failures
-pre-`udelay`, 3/10 after). Since fitting them, **28,454,912 sectors have been
+pre-`udelay`, 3/10 after). Since fitting them, **39,824,384 sectors have been
 written, read back and compared with exactly one corrupt sector**, and that one
 came in the first few thousand. It looked like this, and two independent
 read-backs agreed, so the damage was on the card, not in the read path:
@@ -1282,8 +1304,8 @@ sectors and can say nothing about a rate below a few percent — the two clean
 actually supports rather than the point estimate.
 
 That mistake is worth naming: a single corruption event was written up here as
-a rate of "1 in 46,736", and 28 million sectors later it is bounded below
-1.8e-07. One event is not a rate. The same trap caught the reboot count in the
+a rate of "1 in 46,736", and 40 million sectors later it is bounded below
+7.5e-08. One event is not a rate. The same trap caught the reboot count in the
 open section below, where 24 inferred resets turned out to be one measured one.
 
 **Why it went unnoticed for so long.** The one thing the write path had been
