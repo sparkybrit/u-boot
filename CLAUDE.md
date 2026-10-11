@@ -888,41 +888,100 @@ anything; it did once on 2026-10-11.
 ## Memory map
 
 Decoded from **A25/A24** into four 16 MB quadrants, repeating every 64 MB
-(A26–A31 are not decoded). The board moved to this on 2026-10-10 for the
-sparky1-backplane, which carries only A0–A25; U-Boot followed on branch
-`sparky1-a25-a24-map`.
-
-**Checked on the board 2026-10-11** (build `0f130755507`, card
-`SDCFXPS-064G`): boots to the prompt, probes the CF; `time sleep 1` gives
-1.000 s, so the timer interrupt works through the vector table at
-`0x01000000`; the INIT_RAM poison test is clean (16128 longwords);
-LBA 0 reads `55aa`; `part list`, `ls` and `load` to `${loadaddr}` all work;
-and `reset` comes back through a full boot. No CF writes were tested.
+(A26–A31 are not decoded). **SRAM is at 0 and the NVRAM above it** since
+2026-10-11 — busdecoder revision 03 in the hardware project, U-Boot branch
+`sparky1-sram-at-0` — because Linux wants RAM at 0.
 
 | Region | Base | Chip select | U-Boot setting |
 |--------|------|-------------|----------------|
-| NVRAM (boot image) | `0x00000000` | `/ROMCS` | `CFG_SYS_FLASH_BASE` |
-| SRAM | `0x01000000` | `/RAMCS` | `CFG_SYS_SDRAM_BASE`, `CFG_SYS_INIT_RAM_ADDR` |
+| SRAM | `0x00000000` | `/RAMCS` | `CFG_SYS_SDRAM_BASE`, `CFG_SYS_INIT_RAM_ADDR` |
+| NVRAM (boot image) | `0x01000000` | `/ROMCS` | `CONFIG_TEXT_BASE`, `CFG_SYS_FLASH_BASE` |
 | XR68C681 DUART | `0x02000000` | `/UARTCS` | `reg` in `sparky1.dts`, `CONFIG_DEBUG_UART_BASE` |
 | CompactFlash | `0x03000000` | `/DISKCS` | `CONFIG_SYS_ATA_BASE_ADDR` |
 
-**Older logs and notes use the old A31/A30 map** — SRAM `0x40000000`, DUART
-`0x80000000`, CF `0xC0000000`. Those are not aliases on today's board: all
-three decode as the NVRAM, so an old-map image or command writes into the boot
-image. Transcripts quoted below from before 2026-10-10 keep their original
-addresses.
+**Checked on the board 2026-10-11** (build `8a8f9e327f89`, card
+`SDCFXPS-064G`): boots to the prompt and probes the CF, from a cold power-on
+(6/6), the RESET button and the programmer's `/RESET` pulse; `time sleep 1`
+gives 1.000 s, so the timer interrupt works through the RAM vector table at 0;
+the INIT_RAM poison test is clean (16128 longwords); the D-cache invalidation
+and I-cache toggle tests pass; LBA 0 reads `55aa`; `part list` and `load` to
+`${loadaddr}` work; `reset` comes back through a full boot (6/6). No CF writes
+were tested.
 
-**All 8 MB is configured since 2026-10-11** (`CFG_SYS_SDRAM_SIZE`
-`0x00800000`, a separate commit from the map change so a fault could be pinned
-to one or the other). The SRAM is two banks of four 1M × 8 devices selected by
-A22: bank A `0x01000000`–`0x013FFFFF`, bank B `0x01400000`–`0x017FFFFF`.
-U-Boot relocates to the top of bank B, so it runs entirely from bank B.
+**The NVRAM decodes only A18–A0**, so it repeats every 512 KB through its
+16 MB quadrant, and **the CPU can write it**. Anything that writes into
+`0x01xxxxxx` — a mistyped `mw` or an old-map address — lands in the boot image.
+That happened once during the move: an `mw.l 0x013f0000` meant for bank B
+wrote NVRAM offset `0x70000`. It missed U-Boot, which ends at about
+`0x3d8b7`. Check the image with `crc32 0x01000000 <len>` against the file.
 
-Checked on the board the same day (build `2ef71b540b88`): `bdinfo` reports
-8 MB; a write to each bank leaves the other untouched, so they are not
-aliased; 128 KB copied across the bank boundary (`0x013F0000`–`0x0140FFFF`)
-compares clean; and the INIT_RAM poison test, LBA 0 = `55aa`, `ls`, `load`,
-`time sleep 1` and `reset` all pass as they did at 4 MB.
+**Older logs and notes use older maps:**
+
+| Until | SRAM | NVRAM | DUART | CF |
+|-------|------|-------|-------|----|
+| 2026-10-10 (A31/A30 decode) | `0x40000000` | `0x00000000` | `0x80000000` | `0xC0000000` |
+| 2026-10-11 (A25/A24, before the swap) | `0x01000000` | `0x00000000` | `0x02000000` | `0x03000000` |
+
+None of the old addresses alias their old device on today's board: the
+A31/A30 ones all decode as SRAM now (A25 = A24 = 0), and `0x01xxxxxx` is the
+NVRAM. An image built for either older map does not boot. Transcripts quoted
+below keep the addresses they were taken with.
+
+**All 8 MB is configured** (`CFG_SYS_SDRAM_SIZE` `0x00800000`). The SRAM is two
+banks of four 1M × 8 devices selected by A22: bank A `0x00000000`–`0x003FFFFF`,
+bank B `0x00400000`–`0x007FFFFF`. U-Boot relocates to the top of bank B, so it
+runs entirely from bank B. (On 2026-10-11, at `0x01000000`, the banks were shown
+not to alias and a 128 KB copy across the boundary compared clean; the swap
+changed only which quadrant selects them.)
+
+### Booting from the NVRAM with RAM at 0 — `/BOOT`
+
+The 68030 fetches its reset SSP from `0x00000000` and its PC from
+`0x00000004`, which is now SRAM, uninitialised at power-on. The `boot` GAL in
+the hardware project (`plds/boot/`) asserts `/BOOT` through `/RESET` and for
+the first 8 **completed** bus cycles after it — the two vectors, a byte at a
+time from the 8-bit NVRAM — and while it is asserted busdecoder sends the
+bottom quadrant to the NVRAM instead of the SRAM. The reset PC in the image is
+`0x01000400`, in the NVRAM's own quadrant, so execution carries on from the
+NVRAM once `/BOOT` releases.
+
+Three things on the U-Boot side follow from it:
+
+- **`start.S` points VBR at the image's own table** (`0x01000000`) before
+  anything else. VBR is 0 after reset, which is now blank SRAM, so without
+  this an exception before `trap_init()` would vector through garbage.
+- **`reset` runs the `RESET` instruction from the NVRAM**, not from the
+  relocated copy: `/RESET` re-arms `/BOOT`, which would send U-Boot's own next
+  8 cycles in the SRAM quadrant to the NVRAM. `do_reset()` jumps to
+  `reset_from_rom()` in `start.S` at its link-time address.
+- **`do_reset()` copies the reset vectors into RAM at 0** first, into the two
+  slots `trap_init()` leaves unused. See the next point for why.
+
+**Two ways the 8-cycle count goes wrong, both seen on the board:**
+
+1. **A floating `/AS` at power-on — fixed in hardware.** The CPU three-states
+   `/AS` during reset, and with nothing holding it high it floated low; the
+   GAL saw a bus cycle in progress, then counted it as ended when the CPU
+   began driving `/AS`. `/BOOT` released after 7 real fetches, the 8th byte of
+   the reset PC came from blank SRAM, and the CPU ran wild — sometimes writing
+   into the NVRAM. Every cold power-on failed (3/3) while every `/RESET`
+   pulse worked, because then `/AS` had been driven high beforehand. **A
+   4.7 kΩ pull-up on `/AS` fixed it** (6/6 cold boots since), and it is a
+   requirement of the board, not an option: the logic analyser showed exactly
+   8 NVRAM fetches before `/BOOT` releases with it fitted.
+2. **The `RESET` instruction resets this CPU — handled in software.** It is
+   not supposed to, but on this board the CPU fetches its reset vectors again
+   as the pulse ends (seen with probes on A24 and R/W). The bus cycle in
+   flight as `/RESET` releases was counted as one of the 8, so again the last
+   byte of the reset PC came from the SRAM, and `reset` hung after
+   `resetting ...`. With the boot image's vectors copied to RAM at 0 first,
+   that byte is right wherever it comes from. Why the CPU resets is not
+   established; the slow, ringing release of `/RESET` (it bounces for about
+   300 ns) is the likeliest suspect.
+
+The lesson for anything that pulses `/RESET` from software: **make RAM at 0
+hold the same reset vectors as the NVRAM**, so the exact cycle on which
+`/BOOT` releases cannot matter.
 
 ### How U-Boot uses the SRAM
 
@@ -931,29 +990,28 @@ relocated code, heap and stack at the top. The load address sits in between,
 with room below it for a kernel to unpack into. With 8 MB configured:
 
 ```
-0x01800000  ┐ end of SRAM
-0x017c2000  │ U-Boot: relocated code                 (relocaddr)
+0x00800000  ┐ end of SRAM
+0x007c2000  │ U-Boot: relocated code                 (relocaddr)
             │ heap (256 KB), board info, device tree
-0x01782bd8  │   boot_params
-0x01780aa0  │   fdt_blob
+0x00780bd8  │   boot_params
+0x0077eaa0  │   fdt_blob
             │ gd and the stack, growing down
             ┘
             │ free: room for the uImage file (~3.5 MB)
-0x01400000  ← CONFIG_SYS_LOAD_ADDR: uImage file lands here; start of bank B
+0x00400000  ← CONFIG_SYS_LOAD_ADDR: uImage file lands here; start of bank B
             │ free: where bootm unpacks the kernel (4 MB less 4 KB)
-0x01001000  ← kernel run address (mkimage -a)
-0x01010000    end of INIT_RAM (pre-relocation only, free afterwards)
-0x01000000  ← RAM vector table (1 KB), start of SRAM
+0x00001000  ← kernel run address (mkimage -a)
+0x00010000    end of INIT_RAM (pre-relocation only, free afterwards)
+0x00000000  ← RAM vector table (1 KB), start of SRAM
 ```
 
-**Measured with `bdinfo` on 2026-10-11** on v2026.10 (build `79b9f7b21533`):
-`relocaddr` `0x017c2000`, `boot_params` `0x01782bd8`, `fdt_blob` `0x01780aa0`.
-On v2026.07 (build `2ef71b540b88`) all three were 4 KB higher — `0x017c3000`,
-`0x01783bd8`, `0x01781aa0`, each exactly 4 MB above its value at 4 MB — the
-v2026.10 image being slightly larger. `bdinfo` reports neither the heap's
-bounds nor the stack pointer on this port, so only those three are measured;
-treat the free space above `0x01400000` as about 3.5 MB less whatever the stack
-uses. `relocaddr` moves with the image size, so recheck after big changes.
+**Measured with `bdinfo` on 2026-10-11** (build `8a8f9e327f89`): `relocaddr`
+`0x007c2000`, `boot_params` `0x00780bd8`, `fdt_blob` `0x0077eaa0` — each
+exactly 16 MB below its value before the swap, so the layout inside the SRAM
+is unchanged. `bdinfo` reports neither the heap's bounds nor the stack pointer
+on this port, so only those three are measured; treat the free space above
+`0x00400000` as about 3.5 MB less whatever the stack uses. `relocaddr` moves
+with the image size, so recheck after big changes.
 
 **`CONFIG_SYS_LOAD_ADDR` is where the file lands, not where the kernel runs.**
 `load`/`fatload` with no address argument use `$loadaddr`, falling back to
@@ -963,20 +1021,21 @@ address in the uImage *header*, set by `mkimage -a`, and jumps to `mkimage -e`.
 
 | Address | Role | Set by |
 |---------|------|--------|
-| `0x01400000` | scratch: the raw uImage file | `CONFIG_SYS_LOAD_ADDR` |
-| `0x01001000` | where the kernel runs | `mkimage -a 0x01001000 -e 0x01001000` |
+| `0x00400000` | scratch: the raw uImage file | `CONFIG_SYS_LOAD_ADDR` |
+| `0x00001000` | where the kernel runs | `mkimage -a 0x00001000 -e 0x00001000` |
 
-The kernel goes at `0x01001000` because classic m68k links at `0x1000` with
+The kernel goes at `0x00001000` because classic m68k links at `0x1000` with
 `PAGE_OFFSET` 0 — see the Linux boot section of the hardware project's notes.
+Physical and virtual addresses now agree, which is what the swap was for.
 
 **Two size limits:**
 
 1. **The uImage file must fit below U-Boot** — about 3.5 MB from
-   `0x01400000`. A bigger load runs into the stack and heap. Ample for a
+   `0x00400000`. A bigger load runs into the stack and heap. Ample for a
    compressed kernel; an uncompressed uImage is the case to watch.
 2. **The unpacked kernel must fit below the file** — 4 MB less 4 KB, from
-   `0x01001000` to `0x01400000`. Only the image counts: the kernel's BSS and
-   the bootinfo after it may run past `0x01400000`, because by the time either
+   `0x00001000` to `0x00400000`. Only the image counts: the kernel's BSS and
+   the bootinfo after it may run past `0x00400000`, because by the time either
    is written `bootm` has finished with the file.
 
 Breaking the second fails loudly, not silently. `bootm` overwrites its own
@@ -985,11 +1044,10 @@ afterwards and, for a legacy uImage, refuses to boot (`BOOTM_ERR_OVERLAP`). The
 check comes after the damage, so the file must be reloaded before retrying.
 
 **History.** The load address was `0x01200000` until 2026-10-11, which left
-the unpacked kernel only about 2 MB. It moved to `0x01400000` once 8 MB was
-configured — it assumes 8 MB; at 4 MB it would be the end of RAM. Checked on
-the board (build `520f8216146d`): `loadaddr` reads `0x01400000`, and `load` with
-`${loadaddr}` lands there intact. The test recipes below use `0x01200000` as an
-explicit scratch address, not `${loadaddr}`, so they are unaffected.
+the unpacked kernel only about 2 MB; it then moved to `0x01400000`, the start
+of bank B, and with the swap to `0x00400000`, still the start of bank B. It
+assumes 8 MB; at 4 MB it would be the end of RAM. The test recipes below use
+`0x00200000` as an explicit scratch address, not `${loadaddr}`.
 
 ## Repository layout (m68k-relevant paths)
 
@@ -1018,11 +1076,12 @@ explicit scratch address, not `${loadaddr}`, so they are unaffected.
 ### Phase 0 — start.S (from flash, before relocation and before C)
 
 ```
-reset vector fetch (0x000004 → _start)
+reset vector fetch (0x000000/0x000004, sent to the NVRAM by /BOOT → _start = 0x01000400)
 arch/m68k/cpu/mc68030/start.S:_start
   ├─ %sr = 0x2700                                             disable all interrupts
+  ├─ %vbr = _vectors (0x01000000)                             the image's own table: 0 is blank SRAM until trap_init()
   ├─ %a5 = __got_start                                        set %a5 to the linker's Global Offset Table in Flash
-  ├─ %sp = CFG_SYS_INIT_RAM_ADDR + CFG_SYS_INIT_RAM_SIZE      set %sp to top of the init ram area (0x0101:0000)
+  ├─ %sp = CFG_SYS_INIT_RAM_ADDR + CFG_SYS_INIT_RAM_SIZE      set %sp to top of the init ram area (0x0001:0000)
   ├─ common/init/board_init.c:board_init_f_alloc_reserve()    reserve space for global_data at top of init ram 
   ├─ common/init/board_init.c:board_init_f_init_reserve()     zero the global_data struct
   ├─ arch/m68k/cpu/mc68030/cpu_init.c:cpu_init_f()
@@ -1152,11 +1211,11 @@ common/board_r.c:initcall_run_r()
 
 The vector table in flash is **never copied to RAM**. Instead, `trap_init()` in `arch/m68k/lib/traps.c` builds a fresh table directly in RAM:
 
-- **Destination:** `CFG_SYS_SDRAM_BASE` = `0x01000000` (base of SDRAM)
-- **Contents:** vectors 2–24 and 32–63 → `_exc_handler`; vectors 25–31 and 64–255 → `_int_handler` (all pointing to their relocated RAM addresses). Vectors 0 (initial SP) and 1 (reset PC) are not written.
-- **VBR set:** `setvbr(0x01000000)` at the end of `trap_init()`, called from `arch_initr_trap()` during `initcall_run_r()` in phase 2.
+- **Destination:** `CFG_SYS_SDRAM_BASE` = `0x00000000` (base of SDRAM)
+- **Contents:** vectors 2–24 and 32–63 → `_exc_handler`; vectors 25–31 and 64–255 → `_int_handler` (all pointing to their relocated RAM addresses). Vectors 0 (initial SP) and 1 (reset PC) are not written by `trap_init()`; `do_reset()` fills them with the boot image's reset vectors before pulsing `/RESET` — see [`/BOOT`](#booting-from-the-nvram-with-ram-at-0--boot).
+- **VBR set:** `setvbr(0x00000000)` at the end of `trap_init()`, called from `arch_initr_trap()` during `initcall_run_r()` in phase 2.
 
-Before `setvbr` is called, VBR defaults to 0x000000 and the flash vector table handles any early exceptions.
+Before `setvbr` is called, VBR points at the flash vector table at `0x01000000`, set by `start.S` as its first act, and that table handles any early exceptions. (VBR's reset value, 0, is blank SRAM on this map.)
 
 ## Build
 
@@ -1172,7 +1231,7 @@ The 68030 requires `-mcpu=68030` (not `-mcpu=5307` or any ColdFire flag). Verify
 
 ## Programming the board
 
-The boot store is a Dallas DS1250Y NVSRAM at `0x00000000`. It is not removed
+The boot store is a Dallas DS1250Y NVSRAM at `0x01000000`. It is not removed
 and flashed in a programmer — it stays soldered and is written **in-circuit**
 by the Teensy++ 2.0 in `../nvram-programmer/`, which requests the 68030 bus via
 `/BR`/`/BGACK`, DMA-writes the NVRAM, reads it back to verify, releases the
@@ -1186,12 +1245,21 @@ Success prints `Done.` then `Verified.` — the read-back matched, so the
 contents are confirmed, not merely written. The board reboots into the new
 image on its own; no manual reset.
 
-**`u-boot.bin` is written at NVRAM address 0, not 0x400.** The image *starts*
-with the exception vector table: offset 0x004 holds `0x00000400`, which is
-`_start`, and 0x008 onward hold `_exc_handler`. `CONFIG_SYS_MONITOR_BASE`
-= 0x400 is where U-Boot sits *inside* the image, not where the image is
-loaded. The programmer always writes from address 0, which is correct.
-The whole image must fit the 512 KB device (currently ~283 KB).
+**`u-boot.bin` is written at the start of the NVRAM, not at 0x400.** The
+image is linked at `CONFIG_TEXT_BASE` = `0x01000000` and *starts* with the
+exception vector table: offset 0x004 holds `0x01000400`, which is `_start`,
+and 0x008 onward hold `_exc_handler`. `CONFIG_SYS_MONITOR_BASE` =
+`0x01000400` is where U-Boot's code sits *inside* the image. The programmer
+writes from NVRAM offset 0, which is correct. The whole image must fit the
+512 KB device (currently ~246 KB, `0x3d8b7` bytes).
+
+**The programmer must drive A24 high** to reach the NVRAM at `0x01000000` —
+nvram-programmer branch `a24-high`, uploaded to the Teensy 2026-10-11. By the
+time it takes the bus `/BOOT` is long released, so A25 = A24 = 0 would be the
+SRAM. **A mismatch is silent**: old firmware on the new map (or new firmware
+on busdecoder revision 02) writes the SRAM, reads it back from the SRAM, and
+prints `Verified.` with the NVRAM untouched. A changed banner, or
+`crc32 0x01000000 <len>` matching the file, is what proves a write landed.
 
 ### Gotchas
 
@@ -1216,12 +1284,29 @@ The whole image must fit the 512 KB device (currently ~283 KB).
   reboot needs a reflash are out of date. It prints `resetting ...` and comes
   back through the full boot. Start the console capture *before* sending it, or
   the boot log is missed — a capture that opens the port and then flushes will
-  throw the banner away and the board will look dead.
-- **`reset` pulses /RESET to the CompactFlash card, `ide reset` does not.**
-  That makes `reset` a far better proxy for a cold boot, and the only way to
-  chase the intermittent 8-bit-mode rejection below without power cycling.
+  throw the banner away and the board will look dead. On the SRAM-at-0 map it
+  hung after `resetting ...` until `do_reset()` learned to copy the reset
+  vectors into RAM at 0 (`8a8f9e327f8`); see
+  [`/BOOT`](#booting-from-the-nvram-with-ram-at-0--boot).
+- **Cold boots are safe again, but only with the pull-up on `/AS`.** Without
+  it every power-on failed and the runaway CPU could write into the NVRAM. If
+  the board is ever silent after a power-on but boots from the RESET button,
+  suspect that pull-up first, and checksum the NVRAM before trusting it.
+- **The console cable is powered from USB, the Teensy from the board.**
+  `/dev/ttyUSB0` stays put across a board power cycle; `/dev/ttyACM0`
+  disappearing and reappearing is what marks one. A script that waits for the
+  console to re-enumerate after power-on will wait forever.
+- **`reset` pulses /RESET, `ide reset` does not.** If the card's reset is on
+  that net — believed so, but see the stuck-busy card below — that makes
+  `reset` a far better proxy for a cold boot, and the only way to chase the
+  intermittent 8-bit-mode rejection below without power cycling.
 - The `/RESET` pulse `nvram_write` issues after a successful write still works
   and is the only option if the board is wedged past the console.
+- **A CF card a test left busy may need a power cycle.** On 2026-10-11, after
+  a hardware-project test, U-Boot's probe printed `Bus 0: ....` indefinitely —
+  the card reporting BSY — through the programmer's `/RESET` pulse; a power
+  cycle cleared it. Whether the card's own reset is on the `/RESET` net is not
+  recorded in the schematic, which does not show the CF.
 - **Do not swap the CF card with the power on.** A hot insert put the board
   into a continuous `Bogus External Interrupt Vector 144` storm, and NVRAM
   reads through the programmer went unstable — three reads of the same KB
@@ -1242,17 +1327,17 @@ icache
 dcache
 
 # Write with D-cache ON, disable, read back — write-through means memory is always current
-mw.l 0x01200000 0xdeadbeef 0x40
-md.l 0x01200000 8
+mw.l 0x00200000 0xdeadbeef 0x40
+md.l 0x00200000 8
 dcache off
-md.l 0x01200000 8
+md.l 0x00200000 8
 # Both reads must show 0xdeadbeef
 
 # Write new pattern with cache OFF, re-enable — dcache_enable() calls dcache_invalid()
 # so re-enable must flush any stale lines; if this reads 0xdeadbeef the invalidation is broken
-mw.l 0x01200000 0xcafebabe 0x40
+mw.l 0x00200000 0xcafebabe 0x40
 dcache on
-md.l 0x01200000 8
+md.l 0x00200000 8
 # Must show 0xcafebabe
 
 # I-cache toggle — a hang or reset here means pipeline state was corrupted on re-enable
@@ -1266,23 +1351,23 @@ dcache
 
 ```
 # Pre-fill both regions with matching data so cmp won't complain
-mw.l 0x01100000 0xdeadbeef 0x10000
-mw.l 0x01110000 0xdeadbeef 0x10000
+mw.l 0x00100000 0xdeadbeef 0x10000
+mw.l 0x00110000 0xdeadbeef 0x10000
 
 echo "--- caches OFF ---"
 icache off
 dcache off
-time mw.l 0x01100000 0x12345678 0x10000
-time cmp.l 0x01100000 0x01110000 0x8000
+time mw.l 0x00100000 0x12345678 0x10000
+time cmp.l 0x00100000 0x00110000 0x8000
 
 echo "--- caches ON ---"
 icache on
 dcache on
-time mw.l 0x01100000 0x12345678 0x10000
-time cmp.l 0x01100000 0x01110000 0x8000
+time mw.l 0x00100000 0x12345678 0x10000
+time cmp.l 0x00100000 0x00110000 0x8000
 ```
 
-The scratch addresses (0x01100000 / 0x01110000) sit in bank A of the 8 MB SRAM (0x01000000–0x017FFFFF), well below where U-Boot relocates to near the top. If both timed results round to zero, increase the count to `0x40000` (1 MB). The D-cache speedup is most visible on the `cmp` (read-heavy) operation; `mw` speedup is smaller because the 68030 D-cache is write-through.
+The scratch addresses (0x00100000 / 0x00110000) sit in bank A of the 8 MB SRAM (bank A `0x00000000`–`0x003FFFFF`), above INIT_RAM and well below where U-Boot relocates to near the top. If both timed results round to zero, increase the count to `0x40000` (1 MB). The D-cache speedup is most visible on the `cmp` (read-heavy) operation; `mw` speedup is smaller because the 68030 D-cache is write-through.
 
 ### CompactFlash verification
 
@@ -1333,7 +1418,7 @@ Then, at the prompt:
 ide info                          # re-report what was found
 part list ide 0                   # partition table
 ls ide 0:1 /                      # FAT directory listing
-load ide 0:1 0x01200000 /file     # read a file into SDRAM
+load ide 0:1 0x00200000 /file     # read a file into SDRAM
 ```
 
 #### Read/write integrity
@@ -1345,8 +1430,8 @@ block number and block count — and operate on the current device, which
     ide read  addr blk# cnt
     ide write addr blk# cnt
 
-The tests below use two 4 KB buffers at `0x01100000` and `0x01110000`. Those
-sit in bank A of SRAM (`0x01000000`–`0x017FFFFF`), well above INIT_RAM
+The tests below use two 4 KB buffers at `0x00100000` and `0x00110000`. Those
+sit in bank A of SRAM (`0x00000000`–`0x003FFFFF`), well above INIT_RAM
 and well below where U-Boot relocates to, so nothing live is at risk. Sizes
 line up as: 8 sectors × 512 B = 4096 B = `0x1000` bytes = `0x400` longwords,
 which is the count `mw.l` and `cmp.l` take.
@@ -1360,11 +1445,11 @@ a multi-sector burst:
 
 ```
 ide device 0
-mw.l 0x01100000 0xdeadbeef 0x80     # 0x80 longwords = 512 B = one sector
-mw.l 0x01110000 0x00000000 0x80     # clear dest: a failed read must not pass
-ide write 0x01100000 0x1000 0x1
-ide read  0x01110000 0x1000 0x1
-cmp.l 0x01100000 0x01110000 0x80
+mw.l 0x00100000 0xdeadbeef 0x80     # 0x80 longwords = 512 B = one sector
+mw.l 0x00110000 0x00000000 0x80     # clear dest: a failed read must not pass
+ide write 0x00100000 0x1000 0x1
+ide read  0x00110000 0x1000 0x1
+cmp.l 0x00100000 0x00110000 0x80
 ```
 
 Then 8 sectors in one command. This is worth doing separately: the card
@@ -1372,11 +1457,11 @@ re-asserts DRQ for each sector without being re-commanded, so it exercises
 the inter-sector turnaround that the single-sector path never reaches.
 
 ```
-mw.l 0x01100000 0xdeadbeef 0x400
-mw.l 0x01110000 0x00000000 0x400
-ide write 0x01100000 0x1000 0x8
-ide read  0x01110000 0x1000 0x8
-cmp.l 0x01100000 0x01110000 0x400
+mw.l 0x00100000 0xdeadbeef 0x400
+mw.l 0x00110000 0x00000000 0x400
+ide write 0x00100000 0x1000 0x8
+ide read  0x00110000 0x1000 0x8
+cmp.l 0x00100000 0x00110000 0x400
 ```
 
 A pass prints `Total of 1024 word(s) were the same` — `cmp` calls a `.l`
@@ -1384,20 +1469,21 @@ object a "word" regardless of the suffix, so that is 1024 longwords, not
 1024 16-bit words. A failure names both addresses and both values:
 
 ```
-word at 0x01100000 (0xdeadbeef) != word at 0x01110000 (0x00000000)
+word at 0x00100000 (0xdeadbeef) != word at 0x00110000 (0x00000000)
 ```
 
 `0xdeadbeef` is a poor pattern for spotting a sector landing at the wrong
 offset, since every longword is identical. For a non-repeating pattern,
 copy 4 KB of U-Boot's own image out of NVRAM instead of filling a constant —
-it is varied, read-only and always present:
+it is varied, always present, and read-only as far as this test goes (the CPU
+*can* write the NVRAM, so never swap the operands):
 
 ```
-cp.l 0x00001000 0x01100000 0x400
-mw.l 0x01110000 0x00000000 0x400
-ide write 0x01100000 0x1000 0x8
-ide read  0x01110000 0x1000 0x8
-cmp.l 0x01100000 0x01110000 0x400
+cp.l 0x01001000 0x00100000 0x400
+mw.l 0x00110000 0x00000000 0x400
+ide write 0x00100000 0x1000 0x8
+ide read  0x00110000 0x1000 0x8
+cmp.l 0x00100000 0x00110000 0x400
 ```
 
 **What a round-trip cannot catch.** Writing and reading through the same
@@ -1410,8 +1496,8 @@ The cheapest source is a card partitioned or formatted on a PC: LBA 0 ends
 with the boot signature `0x55 0xAA` at offset `0x1FE`.
 
 ```
-ide read 0x01100000 0x0 0x1
-md.w 0x011001fe 1
+ide read 0x00100000 0x0 0x1
+md.w 0x001001fe 1
 ```
 
 On big-endian m68k the byte at the lower address is the high half, so a
@@ -1477,7 +1563,8 @@ board needs to defend against them.
 1. **The console drops characters.** Blasting a command at 115200 with no flow
    control makes the 16 MHz 68030 lose bytes mid-line — `mw.l 0x01180000 0
    0x20000` arrived as `mw.` and U-Boot answered with a usage message, leaving
-   the buffer unpoisoned. Send commands character by character (~1.5 ms apart)
+   the buffer unpoisoned. (That was SRAM at the time; on today's map `0x01xxxxxx`
+   is the NVRAM, so do not reuse the address.) Send commands character by character (~1.5 ms apart)
    and **verify the echoed first line matches what was sent**, retrying if not.
    A stray `> ` continuation prompt, left by an unterminated quote, will also
    hang any driver waiting for `=> `; send Ctrl-C first to resync.
@@ -1558,7 +1645,7 @@ Everything from LBA 2048 to 6015 is zeros. So:
    reproduce the on-disk byte order through m68k's `mw.l`.
 
 Keep the buffer well below `relocaddr` (check `bdinfo`; it was
-`0x017c2000` with 8 MB on v2026.10), so `0x01100000` is safe. The whole run is ~157 commands and takes about two
+`0x007c2000` with 8 MB on the SRAM-at-0 map), so `0x00100000` is safe. The whole run is ~157 commands and takes about two
 minutes, dominated by the metadata zeroing.
 
 This is also the only real test of the **write** path: format from the SBC,
@@ -1567,37 +1654,37 @@ it. A round-trip through this driver alone cannot detect a symmetric fault.
 
 ### INIT_RAM relocation verification
 
-After relocation, U-Boot must use only the relocated `gd`, stack, and heap in the upper SDRAM — nothing should touch INIT_RAM (0x01000000–0x0100FFFF, the bottom 64 KB of SDRAM) again.
+After relocation, U-Boot must use only the relocated `gd`, stack, and heap in the upper SDRAM — nothing should touch INIT_RAM (0x00000000–0x0000FFFF, the bottom 64 KB of SDRAM) again.
 
-**Important:** the exception vector table lives at `0x01000000–0x010003FF` (256 vectors × 4 bytes). Do **not** poison that region — any exception during the test would vector to the poison value and hard-crash. Start poisoning at `0x01000400` (the first byte after the table). The usable poison range is therefore `0x01000400–0x0100FFFF` = 63 KB − 0 = 0x3F00 longwords.
+**Important:** the exception vector table lives at `0x00000000–0x000003FF` (256 vectors × 4 bytes). Do **not** poison that region — any exception during the test would vector to the poison value and hard-crash. Start poisoning at `0x00000400` (the first byte after the table). The usable poison range is therefore `0x00000400–0x0000FFFF` = 63 KB − 0 = 0x3F00 longwords.
 
-Poison from `0x01000400` with a distinctive value, write the same pattern to a reference area above it, exercise U-Boot, then `cmp` the two regions. Any address reported by `cmp` is a location that was written after poisoning — a stale pointer or residual stack/heap use.
+Poison from `0x00000400` with a distinctive value, write the same pattern to a reference area above it, exercise U-Boot, then `cmp` the two regions. Any address reported by `cmp` is a location that was written after poisoning — a stale pointer or residual stack/heap use.
 
 ```
-# Poison INIT_RAM, skipping the vector table at 0x01000000–0x010003FF
-# 0x3F00 longwords = 63 KB starting at 0x01000400
-mw.l 0x01000400 0xdeadc0de 0x3f00
+# Poison INIT_RAM, skipping the vector table at 0x00000000–0x000003FF
+# 0x3F00 longwords = 63 KB starting at 0x00000400
+mw.l 0x00000400 0xdeadc0de 0x3f00
 
-# Write same pattern to reference area (above INIT_RAM, below the 0x01200000 scratch area)
-mw.l 0x01020400 0xdeadc0de 0x3f00
+# Write same pattern to reference area (above INIT_RAM, below the 0x00200000 scratch area)
+mw.l 0x00020400 0xdeadc0de 0x3f00
 
-# Confirm relocated gd, sp, and heap are all up near 0x013xxxxx — not in INIT_RAM
+# Confirm relocated gd, sp, and heap are all up near 0x007xxxxx — not in INIT_RAM
 bdinfo
 
 # Exercise U-Boot to trigger any residual INIT_RAM access
 printenv
 dm tree
-md.l 0x01000400 4
+md.l 0x00000400 4
 
 # Compare — "Total of 16128 word(s) were the same" means INIT_RAM is clean
 # (cmp calls a .l object a "word"; that is 16128 longwords)
 # Any reported address means something still touched INIT_RAM after relocation
-cmp.l 0x01000400 0x01020400 0x3f00
+cmp.l 0x00000400 0x00020400 0x3f00
 ```
 
-If `cmp` flags an address, the offset from `0x01000400` locates which part of INIT_RAM was touched: offsets near zero suggest a stale heap or BSS pointer; offsets near `0xBBFC` (= `0xF000 - 0x400`) suggest a leftover stack reference (the initial stack and `gd` struct were reserved at the top of INIT_RAM by `board_init_f_alloc_reserve()`).
+If `cmp` flags an address, the offset from `0x00000400` locates which part of INIT_RAM was touched: offsets near zero suggest a stale heap or BSS pointer; offsets near `0xBBFC` (= `0xF000 - 0x400`) suggest a leftover stack reference (the initial stack and `gd` struct were reserved at the top of INIT_RAM by `board_init_f_alloc_reserve()`).
 
-Run `bdinfo` before poisoning to confirm that `gd`, `sp`, and the malloc arena are all well above `0x0100FFFF`. If any of them appear in the `0x01000xxx` range, relocation did not complete correctly and poisoning would corrupt live data.
+Run `bdinfo` before poisoning to confirm that `gd`, `sp`, and the malloc arena are all well above `0x0000FFFF`. If any of them appear in the `0x00000xxx` range, relocation did not complete correctly and poisoning would corrupt live data.
 
 ## Key differences: classic m68k vs ColdFire
 
