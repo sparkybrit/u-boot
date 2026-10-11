@@ -32,7 +32,7 @@
  * (Set up by the startup code)
  */
 #define CFG_SYS_SDRAM_BASE		0x01000000
-#define CFG_SYS_SDRAM_SIZE		0x00400000
+#define CFG_SYS_SDRAM_SIZE		0x00800000
 
 /*
  * Boot image store: a Dallas DS1250Y NVSRAM at 0x00000000, holding the
