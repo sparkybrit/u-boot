@@ -147,7 +147,7 @@ Using the card::
     ide info                 # controller is probed at boot; this re-reports
     part list ide 0          # partition table
     ls ide 0:1 /             # FAT directory listing
-    load ide 0:1 0x01200000 /boot/image
+    load ide 0:1 ${loadaddr} /boot/image
 
 Exception Vector Table
 ----------------------

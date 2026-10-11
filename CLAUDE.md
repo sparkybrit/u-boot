@@ -892,10 +892,9 @@ with room below it for a kernel to unpack into. With 8 MB configured:
 0x01781aa0  │   fdt_blob
             │ gd and the stack, growing down
             ┘
-            │ free: room for the uImage file (~5.5 MB)
-0x01400000    start of bank B
-0x01200000  ← CONFIG_SYS_LOAD_ADDR: uImage file lands here
-            │ free: where bootm unpacks the kernel (~2 MB)
+            │ free: room for the uImage file (~3.5 MB)
+0x01400000  ← CONFIG_SYS_LOAD_ADDR: uImage file lands here; start of bank B
+            │ free: where bootm unpacks the kernel (4 MB less 4 KB)
 0x01001000  ← kernel run address (mkimage -a)
 0x01010000    end of INIT_RAM (pre-relocation only, free afterwards)
 0x01000000  ← RAM vector table (1 KB), start of SRAM
@@ -905,7 +904,7 @@ with room below it for a kernel to unpack into. With 8 MB configured:
 `0x017c3000`, `boot_params` `0x01783bd8`, `fdt_blob` `0x01781aa0` — each
 exactly 4 MB above its value at 4 MB. `bdinfo` reports neither the heap's
 bounds nor the stack pointer on this port, so only those three are measured;
-treat the free space above `0x01200000` as about 5.5 MB less whatever the stack
+treat the free space above `0x01400000` as about 3.5 MB less whatever the stack
 uses. `relocaddr` moves with the image size, so recheck after big changes.
 
 **`CONFIG_SYS_LOAD_ADDR` is where the file lands, not where the kernel runs.**
@@ -916,7 +915,7 @@ address in the uImage *header*, set by `mkimage -a`, and jumps to `mkimage -e`.
 
 | Address | Role | Set by |
 |---------|------|--------|
-| `0x01200000` | scratch: the raw uImage file | `CONFIG_SYS_LOAD_ADDR` |
+| `0x01400000` | scratch: the raw uImage file | `CONFIG_SYS_LOAD_ADDR` |
 | `0x01001000` | where the kernel runs | `mkimage -a 0x01001000 -e 0x01001000` |
 
 The kernel goes at `0x01001000` because classic m68k links at `0x1000` with
@@ -924,17 +923,25 @@ The kernel goes at `0x01001000` because classic m68k links at `0x1000` with
 
 **Two size limits:**
 
-1. **The uImage file must fit below U-Boot** — about 5.5 MB from
-   `0x01200000`. A bigger load runs into the stack and heap. (It was 1.5 MB
-   with 4 MB configured.)
-2. **The unpacked kernel must fit below the file** — about 2 MB from
-   `0x01001000` to `0x01200000`. A bigger kernel overwrites its own compressed
-   source while `bootm` is still reading it.
+1. **The uImage file must fit below U-Boot** — about 3.5 MB from
+   `0x01400000`. A bigger load runs into the stack and heap. Ample for a
+   compressed kernel; an uncompressed uImage is the case to watch.
+2. **The unpacked kernel must fit below the file** — 4 MB less 4 KB, from
+   `0x01001000` to `0x01400000`. Only the image counts: the kernel's BSS and
+   the bootinfo after it may run past `0x01400000`, because by the time either
+   is written `bootm` has finished with the file.
 
-The second is now the binding one. Moving `CONFIG_SYS_LOAD_ADDR` up — e.g. to
-`0x01400000`, the start of bank B — would raise it to about 4 MB and leave
-about 3.5 MB for the file. It has not been done; the test recipes below use
-`0x01200000` as scratch and would need checking.
+Breaking the second fails loudly, not silently. `bootm` overwrites its own
+compressed source while unpacking, but `bootm_load_os()` checks for the overlap
+afterwards and, for a legacy uImage, refuses to boot (`BOOTM_ERR_OVERLAP`). The
+check comes after the damage, so the file must be reloaded before retrying.
+
+**History.** The load address was `0x01200000` until 2026-10-11, which left
+the unpacked kernel only about 2 MB. It moved to `0x01400000` once 8 MB was
+configured — it assumes 8 MB; at 4 MB it would be the end of RAM. Checked on
+the board (build `520f8216146d`): `loadaddr` reads `0x01400000`, and `load` with
+`${loadaddr}` lands there intact. The test recipes below use `0x01200000` as an
+explicit scratch address, not `${loadaddr}`, so they are unaffected.
 
 ## Repository layout (m68k-relevant paths)
 
@@ -1523,7 +1530,7 @@ Poison from `0x01000400` with a distinctive value, write the same pattern to a r
 # 0x3F00 longwords = 63 KB starting at 0x01000400
 mw.l 0x01000400 0xdeadc0de 0x3f00
 
-# Write same pattern to reference area (above INIT_RAM, below load address at 0x01200000)
+# Write same pattern to reference area (above INIT_RAM, below the 0x01200000 scratch area)
 mw.l 0x01020400 0xdeadc0de 0x3f00
 
 # Confirm relocated gd, sp, and heap are all up near 0x013xxxxx — not in INIT_RAM
