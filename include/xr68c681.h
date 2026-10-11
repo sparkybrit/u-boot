@@ -153,19 +153,29 @@ typedef struct xr68c681 {
 
 /*********************************************************************
  * UIMR — Interrupt Mask Register / UISR — Interrupt Status Register
+ *
+ * The two registers share one layout: a UIMR bit enables the interrupt for
+ * the UISR bit in the same position. Bits 4-6 are channel B. (The UISR names
+ * used to be ColdFire UART ones - RXFTO, TXFIFO, RXFIFO - which put the wrong
+ * meaning on bits 3-5; bit 3 is the counter/timer.)
  *********************************************************************/
-#define UART_UIMR_TXRDY			(0x01)
-#define UART_UIMR_RXRDY_FU		(0x02)
-#define UART_UIMR_DB			(0x04)
-#define UART_UIMR_COS			(0x80)
+#define UART_UIMR_TXRDY			(0x01)	/* channel A transmitter ready */
+#define UART_UIMR_RXRDY_FU		(0x02)	/* channel A receiver ready / FIFO full */
+#define UART_UIMR_DB			(0x04)	/* channel A delta break */
+#define UART_UIMR_CTRDY			(0x08)	/* counter/timer ready */
+#define UART_UIMR_TXRDYB		(0x10)	/* channel B transmitter ready */
+#define UART_UIMR_RXRDY_FUB		(0x20)	/* channel B receiver ready / FIFO full */
+#define UART_UIMR_DBB			(0x40)	/* channel B delta break */
+#define UART_UIMR_COS			(0x80)	/* input port change of state */
 
-#define UART_UISR_TXRDY			(0x01)
-#define UART_UISR_RXRDY_FU		(0x02)
-#define UART_UISR_DB			(0x04)
-#define UART_UISR_RXFTO			(0x08)
-#define UART_UISR_TXFIFO		(0x10)
-#define UART_UISR_RXFIFO		(0x20)
-#define UART_UISR_COS			(0x80)
+#define UART_UISR_TXRDY			UART_UIMR_TXRDY
+#define UART_UISR_RXRDY_FU		UART_UIMR_RXRDY_FU
+#define UART_UISR_DB			UART_UIMR_DB
+#define UART_UISR_CTRDY			UART_UIMR_CTRDY
+#define UART_UISR_TXRDYB		UART_UIMR_TXRDYB
+#define UART_UISR_RXRDY_FUB		UART_UIMR_RXRDY_FUB
+#define UART_UISR_DBB			UART_UIMR_DBB
+#define UART_UISR_COS			UART_UIMR_COS
 
 /*********************************************************************
  * UIP — Input Port / Output Port registers
