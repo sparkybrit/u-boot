@@ -151,12 +151,31 @@ Bus timing — the ATA ``/IORD`` and ``/IOWR`` strobes, the wait states and
 cycle to about 437 ns to meet ATA PIO mode 0. The 400 ns the ATA spec requires
 between the last data byte and the following status read is therefore free.
 
-Throughput is limited by the 100 Hz system timer rather than by the bus. The
-driver polls with ``udelay(100)`` between status reads, and the coarsest tick
-available is 10 ms, so a transfer that has to wait at all waits a whole tick.
-Reads run at roughly 50 KB/s. Sixteen-bit mode is wired up in ``cfmanager``
-but commented out; enabling it means clearing ``CONFIG_SYS_ATA_DATA_8BIT`` as
-well as changing the PLD.
+Throughput is limited by the bus: every sector is 512 single-byte port reads
+or writes. It used to be limited by the 100 Hz system timer instead, because
+``udelay()`` could not wait for less than a 10 ms tick, and the driver's
+``udelay(50)`` after each sector's command cost a whole tick — capping reads
+at about 50 KB/s. The board now overrides ``__udelay()`` to count the
+XR68C681's counter directly, at 230400 Hz, leaving ``get_timer()`` and the
+100 Hz tick untouched. Measured with ``ide read`` and ``ide write`` of 1024
+sectors (512 KB):
+
+.. list-table::
+   :header-rows: 1
+
+   * - Card
+     - Read
+     - Write
+   * - SanDisk SDCFX-008G
+     - 1.07 s (about 480 KB/s)
+     - 2.9–3.2 s (about 160–170 KB/s)
+   * - SDCFXPS-064G
+     - 0.78 s (about 660 KB/s)
+     - 1.1–2.1 s
+
+Sixteen-bit mode is wired up in ``cfmanager`` but commented out; enabling it
+means clearing ``CONFIG_SYS_ATA_DATA_8BIT`` as well as changing the PLD and
+wiring CF D8–D15 to D23–D16.
 
 Using the card::
 
