@@ -14,7 +14,6 @@
 #include <irq_func.h>
 
 #define	IRQ_TIMER_VECTOR 0
-#define	IRQ_TIMER_MASK 0b1000
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -61,7 +60,7 @@ static int xr68c681_timer_probe(struct udevice *dev)
 	irq_install_handler(IRQ_TIMER_VECTOR, (interrupt_handler_t *)timer_interrupt_handler, base);
 
 	/* enable counter/timer interrupts */
-	writeb(IRQ_TIMER_MASK, &base->uimr);
+	writeb(UART_UIMR_CTRDY, &base->uimr);
 
 	/* start the counter/timer: reading offset 0x0E is the Start Counter
 	 * address-triggered command (Table 1, datasheet). */
