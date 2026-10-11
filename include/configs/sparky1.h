@@ -24,19 +24,19 @@
 /*-----------------------------------------------------------------------
  * Definitions for pre-relocation global data, stack and heap (at the bottom of SRAM)
  */
-#define CFG_SYS_INIT_RAM_ADDR	0x40000000
+#define CFG_SYS_INIT_RAM_ADDR	0x01000000
 #define CFG_SYS_INIT_RAM_SIZE	0x10000	
 
 /*-----------------------------------------------------------------------
  * Start addresses for the final memory configuration
  * (Set up by the startup code)
  */
-#define CFG_SYS_SDRAM_BASE		0x40000000
+#define CFG_SYS_SDRAM_BASE		0x01000000
 #define CFG_SYS_SDRAM_SIZE		0x00400000
 
 /*
  * Boot image store: a Dallas DS1250Y NVSRAM at 0x00000000, holding the
- * exception vector table and U-Boot itself.  Not 0xC0000000 - that quadrant
+ * exception vector table and U-Boot itself.  Not 0x03000000 - that quadrant
  * is /DISKCS, the CompactFlash interface (see CONFIG_SYS_ATA_BASE_ADDR).
  */
 #define CFG_SYS_FLASH_BASE		0x00000000
