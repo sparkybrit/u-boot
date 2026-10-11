@@ -594,13 +594,26 @@ and
 the `strlcpy()` size fix in `ide_probe()` (upstream passes `BLK_*_SIZE` where
 the buffers are `BLK_*_SIZE + 1`, which truncates a maximum-length string by
 one character - it printed `HDX 5.08` as `HDX 5.0`). That last one is an
-upstream bug, not a sparky1 change, and should drop out once fixed upstream.
+upstream bug, not a sparky1 change, and **is fixed upstream from
+v2026.10-rc1** (`0b4c421190a`). Keep it until `sparky` is rebased onto a tag
+that has it: on v2026.07 dropping it would bring the truncation back. On the
+v2026.10 hop the `ide.c` part of local commit `5dab7117602` is identical to
+upstream's and should merge to nothing — check with
+`git diff v2026.10 sparky -- drivers/block/ide.c | grep strlcpy`, which should
+then print nothing.
 
 ### Upstream submission — the `strlcpy()` fix
 
-**Sent 2026-08-29, awaiting review.** This is an **upstream U-Boot bug**, not a
-sparky1 change, so it goes to the mailing list and should disappear from this
-fork on a later rebase.
+**Accepted and merged.** Sent 2026-08-29; Patchwork state `accepted`; landed
+upstream as `0b4c421190a` ("ide: Fix truncation of device strings by one
+character"), committed by Tom Rini on 2026-09-15, and in every tag from
+`v2026.10-rc1` on, including the `v2026.10` release. Patch-identical to what was
+sent. The worktree and the `ide-strlcpy-fix` branch were removed on 2026-10-11;
+the `sent/…-v1` tag is kept as the record of exactly what went out.
+
+This was an **upstream U-Boot bug**, not a sparky1 change, so it went to the
+mailing list and drops out of this fork on the v2026.10 rebase — see the rebase
+note above.
 
 | | |
 |---|---|
@@ -653,13 +666,14 @@ and left the size argument untouched. Check with
 The fix passes `sizeof()` the destination instead, and is deliberately a bare
 three-line change with no comment.
 
-#### Where it lives — a worktree, not a checkout
+#### Where it lived — a worktree, not a checkout
 
 ```
 ~/Projects/u-boot-ide-fix     branch ide-strlcpy-fix, based on upstream/main
 ```
 
-The worktree is what makes this work at all. `CLAUDE.md` does not exist
+(Both removed 2026-10-11, after it merged. A second patch should follow the
+same pattern under its own name.) The worktree is what makes this work at all. `CLAUDE.md` does not exist
 upstream and usually has uncommitted edits, so `git checkout -b … upstream/main`
 in the main tree **refuses** rather than deleting it — the `git stash push
 drivers/block/ide.c` route does not survive the checkout. A worktree sidesteps
@@ -835,9 +849,14 @@ git format-patch -1 -o /tmp && scripts/get_maintainer.pl --norolestats /tmp/0001
 
 **Afterwards.** Track it at `patchwork.ozlabs.org/project/uboot/`. Expect a
 wait; U-Boot batches through merge windows and `-rc` periods take fixes only —
-which is fine, this *is* a fix. Once it lands upstream, drop the local change,
-remove it from the `ide.c` rebase note above so it stops being a rebase
-conflict, and `git worktree remove ~/Projects/u-boot-ide-fix`.
+which is fine, this *is* a fix. This one took 17 days from sending to being
+committed (2026-08-29 → 2026-09-15), inside the v2026.10 cycle.
+
+Once a patch lands, **do not drop the local copy straight away** — only once
+`sparky` is rebased onto a tag containing it, or the bug comes back in the
+meantime. Then remove the worktree and branch, keeping the `sent/` tag. If a
+transient Patchwork API call returns an empty body, retry before concluding
+anything; it did once on 2026-10-11.
 
 ## Memory map
 
