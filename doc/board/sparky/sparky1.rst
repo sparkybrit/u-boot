@@ -13,15 +13,16 @@ Hardware
 --------
 
 * CPU: Motorola MC68030 at 16 MHz
-* DUART: Exar XR68C681 at 0x80000000, clocked at 3.6864 MHz (serial console,
+* DUART: Exar XR68C681 at 0x02000000, clocked at 3.6864 MHz (serial console,
   counter/timer, GPIO)
 * NVSRAM: Dallas DS1250Y, 512 KB at 0x00000000 — holds the vector table and
   U-Boot itself
-* SDRAM: 4 MB at 0x40000000
-* CompactFlash: True IDE mode, 8 registers at 0xC0000000
+* SDRAM: 4 MB at 0x01000000
+* CompactFlash: True IDE mode, 8 registers at 0x03000000
 
-An address decoder splits the 4 GB space into four 1 GB quadrants from A31/A30,
-one chip select each:
+An address decoder splits each 64 MB into four 16 MB quadrants from A25/A24,
+one chip select each. A26-A31 are not decoded, so the map repeats every
+64 MB through the 4 GB space:
 
 .. list-table::
    :header-rows: 1
@@ -35,20 +36,20 @@ one chip select each:
      - 512 KB
      - /ROMCS
    * - SDRAM
-     - 0x40000000
+     - 0x01000000
      - 4 MB
      - /RAMCS
    * - XR68C681 DUART
-     - 0x80000000
+     - 0x02000000
      - 16 B
      - /UARTCS
    * - CompactFlash
-     - 0xC0000000
+     - 0x03000000
      - 8 B
      - /DISKCS
 
-The whole ``A31 = 1`` half — the DUART and the CompactFlash — is marked
-cache-inhibited by the decoder's ``/CIIN``.
+The whole ``A25 = 1`` half of each 64 MB — the DUART and the CompactFlash —
+is marked cache-inhibited by the decoder's ``/CIIN``.
 
 Building U-Boot
 ---------------
@@ -92,7 +93,7 @@ device with only the command block decoded:
      - Value
      - Kconfig
    * - Base address
-     - 0xC0000000
+     - 0x03000000
      - ``CONFIG_SYS_ATA_BASE_ADDR``
    * - Registers
      - 8, byte-wide, selected by A2–A0
@@ -146,7 +147,7 @@ Using the card::
     ide info                 # controller is probed at boot; this re-reports
     part list ide 0          # partition table
     ls ide 0:1 /             # FAT directory listing
-    load ide 0:1 0x40200000 /boot/image
+    load ide 0:1 0x01200000 /boot/image
 
 Exception Vector Table
 ----------------------
@@ -159,10 +160,10 @@ The 68030 VBR (Vector Base Register) is initialised in two stages:
 
 2. **After relocation** — ``arch_initr_trap()`` (called from ``board_init_r``
    via ``initcall_run_r``) calls ``trap_init(CFG_SYS_SDRAM_BASE)``, which
-   writes a fresh vector table directly into RAM at ``0x40000000`` (the base of
+   writes a fresh vector table directly into RAM at ``0x01000000`` (the base of
    SDRAM). All 254 vectors are filled with the relocated RAM addresses of
    ``_exc_handler`` (vectors 2–24, 32–63) or ``_int_handler`` (vectors 25–31,
-   64–255). ``setvbr(0x40000000)`` then points VBR at the new table.
+   64–255). ``setvbr(0x01000000)`` then points VBR at the new table.
 
 The flash vector table is never copied to RAM; the RAM table is built from
 scratch by ``trap_init()`` in ``arch/m68k/lib/traps.c``.
