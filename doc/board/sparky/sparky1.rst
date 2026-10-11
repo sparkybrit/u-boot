@@ -208,11 +208,13 @@ Vectors 0 and 1 of the RAM table are left unused by ``trap_init()``.
 ``do_reset()`` fills them with the boot image's reset SSP and PC before it
 pulses ``/RESET``. The ``RESET`` instruction itself does not reset a 68030,
 but the processor is reset if ``/RESET`` stays asserted at least eight clocks
-past the instruction's own pulse, and on this board it does — most likely
-because the line rises slowly through a weak pull-up. The CPU then fetches its
-reset vectors, and the boot override can take the last byte of the reset PC
-from RAM at 0 rather than from the NVSRAM. With the same values in both, the
-vector fetch is right either way.
+past the instruction's own pulse, and on this board it did while ``/RESET``
+rose slowly through the supervisor's 5 kΩ pull-up — about 6 clocks to reach
+2.0 V. The CPU then fetched its reset vectors, and the boot override took the
+last byte of the reset PC from RAM at 0 rather than from the NVSRAM. A 1 kΩ
+pull-up on ``/RESET`` (2.0 V in about a clock) stopped it. The copy is kept as
+a safeguard: with the same values in both places, the vector fetch is right
+either way.
 
 Reset
 -----

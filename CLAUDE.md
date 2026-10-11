@@ -969,8 +969,9 @@ Three things on the U-Boot side follow from it:
    4.7 kΩ pull-up on `/AS` fixed it** (6/6 cold boots since), and it is a
    requirement of the board, not an option: the logic analyser showed exactly
    8 NVRAM fetches before `/BOOT` releases with it fitted.
-2. **The CPU is reset as a `RESET` instruction's pulse ends — handled in
-   software.** The instruction itself does not reset a 68030: *"A reset signal
+2. **The CPU was reset as a `RESET` instruction's pulse ended — a slow
+   `/RESET` rise, fixed in hardware with a 1 kΩ pull-up, and also handled
+   in software.** The instruction itself does not reset a 68030: *"A reset signal
    from the processor (asserted as part of the RESET instruction) resets
    external devices only; the internal state of the processor is not
    altered"* (MC68030 User's Manual, in `~/Projects/datasheets`). But the
@@ -979,7 +980,7 @@ Three things on the U-Boot side follow from it:
    resets the processor — and on this board the CPU fetches its reset
    vectors again as the pulse ends (seen with probes on A24 and R/W). So
    `/RESET`, as the CPU's input sees it, stays low at least 8 clocks (500 ns)
-   after the CPU lets go. The likely reason is a slow rise: the net has no
+   after the CPU lets go. The reason was a slow rise: the net had no
    discrete pull-up on the schematic, only the supervisor's — 5 kΩ inside an
    MCP130 (the datasheet in the repo), none in the MCP120 the schematic
    names — against the capacitance of the CPU, DUART, button, Teensy and
@@ -994,18 +995,24 @@ Three things on the U-Boot side follow from it:
    after 365 ns, 5.8 clocks; 2.4 V after 480 ns, 7.7 clocks; 90% after
    1.4 µs. The line also carries about ±0.3 V of noise, so the band where
    the input could read either way stretches to about 7–8 clocks.
-   **Borderline against the manual's eight clocks, not a clean
-   confirmation**: slow enough to explain the reset, since eight is the
-   guaranteed figure and the CPU may act on less, but not proof. Some of the
-   noise may be the probe's ground lead. The direct test is a stronger
-   pull-up (about 1 kΩ, which would pass 2.0 V within a clock): if `reset`
-   then stops producing a fresh vector fetch, the slow rise was the cause.
+   Borderline against the manual's eight clocks on its own, so it was
+   tested directly.
 
-   Whatever the cause, the bus cycle in flight as `/RESET` releases was
+   **Confirmed with a 1 kΩ pull-up on `/RESET`, fitted the same day.** The
+   rise now reaches 0.8 V after 20 ns, **2.0 V after 70 ns (1.1 clocks)**
+   and 90% after 285 ns. The build from *before* the vector-copy fix
+   (`b2d0fd32782c`), whose `reset` hung every time, then passed **6/6**,
+   with RAM at 0–7 zeroed before each attempt so leftover vectors could not
+   rescue it. So the CPU no longer resets: it carries on from the `RESET`
+   instruction to `jmp _start`, as the manual says. **The 1 kΩ on `/RESET`
+   is part of the board now**, like the 4.7 kΩ on `/AS`.
+
+   While it happened, the bus cycle in flight as `/RESET` released was
    counted as one of the 8, so again the last byte of the reset PC came from
-   the SRAM, and `reset` hung after `resetting ...`. With the boot image's
-   vectors copied to RAM at 0 first, that byte is right wherever it comes
-   from.
+   the SRAM, and `reset` hung after `resetting ...`. `do_reset()` still
+   copies the boot image's vectors to RAM at 0 first, so that byte is right
+   wherever it comes from — kept as a safeguard, since a slow `/RESET` is
+   easy to bring back by moving wiring or adding load to the net.
 
 The lesson for anything that pulses `/RESET` from software: **make RAM at 0
 hold the same reset vectors as the NVRAM**, so the exact cycle on which
