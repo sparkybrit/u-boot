@@ -24,22 +24,28 @@
 /*-----------------------------------------------------------------------
  * Definitions for pre-relocation global data, stack and heap (at the bottom of SRAM)
  */
-#define CFG_SYS_INIT_RAM_ADDR	0x01000000
+#define CFG_SYS_INIT_RAM_ADDR	0x00000000
 #define CFG_SYS_INIT_RAM_SIZE	0x10000	
 
 /*-----------------------------------------------------------------------
  * Start addresses for the final memory configuration
  * (Set up by the startup code)
  */
-#define CFG_SYS_SDRAM_BASE		0x01000000
+#define CFG_SYS_SDRAM_BASE		0x00000000
 #define CFG_SYS_SDRAM_SIZE		0x00800000
 
 /*
- * Boot image store: a Dallas DS1250Y NVSRAM at 0x00000000, holding the
- * exception vector table and U-Boot itself.  Not 0x03000000 - that quadrant
- * is /DISKCS, the CompactFlash interface (see CONFIG_SYS_ATA_BASE_ADDR).
+ * Boot image store: a Dallas DS1250Y NVSRAM at 0x01000000, holding the
+ * exception vector table and U-Boot itself (CONFIG_TEXT_BASE).
+ *
+ * The SRAM is at 0, where Linux wants it, so the reset vectors the 68030
+ * fetches from 0x00000000 and 0x00000004 would be uninitialised SRAM.  The
+ * board's /BOOT logic sends the first 8 bus cycles after /RESET - those two
+ * longwords, a byte at a time - to the NVRAM instead, and the reset PC there
+ * points into the NVRAM's own quadrant.  See busdecoder revision 03 and
+ * plds/boot/ in the sparky1 hardware project.
  */
-#define CFG_SYS_FLASH_BASE		0x00000000
+#define CFG_SYS_FLASH_BASE		0x01000000
 
 /*
  * For booting Linux, the board info and command line data
