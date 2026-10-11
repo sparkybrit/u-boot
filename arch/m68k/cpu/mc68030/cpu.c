@@ -32,19 +32,37 @@ int do_reset(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 	void (*rom_reset)(void);
 
 	/*
-	 * A 68030 cannot reset itself.  The RESET instruction drives the
-	 * /RESET pin to reset external devices, but the CPU deliberately
-	 * ignores its own assertion, and this board has no reset line under
+	 * A 68030 is not meant to reset itself.  The RESET instruction
+	 * drives the /RESET pin to reset external devices and the CPU should
+	 * ignore its own assertion, and this board has no reset line under
 	 * software control.  So undo the state board_init_r set up behind
 	 * the boot code's back -- vector base, caches, interrupt mask -- and
 	 * hand over to reset_from_rom(), which pulses /RESET and re-enters
 	 * at _start, exactly where a power-on reset would.
+	 *
+	 * On sparky1 the CPU does in fact reset as the pulse ends -- seen on
+	 * a logic analyser as a fresh reset vector fetch -- so this works
+	 * either way: by the jump to _start, or through the reset vectors.
 	 *
 	 * It must run from the boot image, not from this relocated copy:
 	 * see reset_from_rom() in start.S.  Its link-time address is the
 	 * relocated one less the relocation offset.
 	 */
 	rom_reset = (void (*)(void))((ulong)reset_from_rom - gd->reloc_off);
+
+#if CFG_SYS_SDRAM_BASE != CONFIG_TEXT_BASE
+	/*
+	 * The pulse may reset the CPU after all: on sparky1 it then fetches
+	 * its reset vectors again, and the boot logic that sends those
+	 * fetches to the boot image can count the bus cycle in flight as
+	 * /RESET releases as one of them, leaving the last byte of the reset
+	 * PC to come from RAM at 0.  trap_init() leaves vectors 0 and 1 of
+	 * the RAM table unused, so give them the boot image's values: then
+	 * every byte of the vector fetch is right, wherever it comes from.
+	 */
+	((volatile ulong *)CFG_SYS_SDRAM_BASE)[0] = ((ulong *)CONFIG_TEXT_BASE)[0];
+	((volatile ulong *)CFG_SYS_SDRAM_BASE)[1] = ((ulong *)CONFIG_TEXT_BASE)[1];
+#endif
 
 	puts("resetting ...\n");
 	udelay(50000);			/* let the console drain first */
