@@ -40,9 +40,13 @@ int do_reset(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 	 * hand over to reset_from_rom(), which pulses /RESET and re-enters
 	 * at _start, exactly where a power-on reset would.
 	 *
-	 * On sparky1 the CPU does in fact reset as the pulse ends -- seen on
-	 * a logic analyser as a fresh reset vector fetch -- so this works
-	 * either way: by the jump to _start, or through the reset vectors.
+	 * On sparky1 the CPU is reset anyway as the pulse ends -- seen on a
+	 * logic analyser as a fresh reset vector fetch.  Not by the RESET
+	 * instruction itself: the 68030 resets when /RESET stays asserted at
+	 * least eight clocks past the instruction's own pulse (MC68030UM
+	 * 7.8), and this board's /RESET rises slowly through a weak pull-up.
+	 * So this works either way: by the jump to _start, or through the
+	 * reset vectors.
 	 *
 	 * It must run from the boot image, not from this relocated copy:
 	 * see reset_from_rom() in start.S.  Its link-time address is the
@@ -52,7 +56,7 @@ int do_reset(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 
 #if CFG_SYS_SDRAM_BASE != CONFIG_TEXT_BASE
 	/*
-	 * The pulse may reset the CPU after all: on sparky1 it then fetches
+	 * The CPU may be reset as the pulse ends: on sparky1 it then fetches
 	 * its reset vectors again, and the boot logic that sends those
 	 * fetches to the boot image can count the bus cycle in flight as
 	 * /RESET releases as one of them, leaving the last byte of the reset

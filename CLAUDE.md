@@ -969,15 +969,30 @@ Three things on the U-Boot side follow from it:
    4.7 kΩ pull-up on `/AS` fixed it** (6/6 cold boots since), and it is a
    requirement of the board, not an option: the logic analyser showed exactly
    8 NVRAM fetches before `/BOOT` releases with it fitted.
-2. **The `RESET` instruction resets this CPU — handled in software.** It is
-   not supposed to, but on this board the CPU fetches its reset vectors again
-   as the pulse ends (seen with probes on A24 and R/W). The bus cycle in
-   flight as `/RESET` releases was counted as one of the 8, so again the last
-   byte of the reset PC came from the SRAM, and `reset` hung after
-   `resetting ...`. With the boot image's vectors copied to RAM at 0 first,
-   that byte is right wherever it comes from. Why the CPU resets is not
-   established; the slow, ringing release of `/RESET` (it bounces for about
-   300 ns) is the likeliest suspect.
+2. **The CPU is reset as a `RESET` instruction's pulse ends — handled in
+   software.** The instruction itself does not reset a 68030: *"A reset signal
+   from the processor (asserted as part of the RESET instruction) resets
+   external devices only; the internal state of the processor is not
+   altered"* (MC68030 User's Manual, in `~/Projects/datasheets`). But the
+   same manual (§7.8) adds that an external `/RESET` which *"extend[s] beyond
+   the reset period of the instruction by at least eight clock cycles"*
+   resets the processor — and on this board the CPU fetches its reset
+   vectors again as the pulse ends (seen with probes on A24 and R/W). So
+   `/RESET`, as the CPU's input sees it, stays low at least 8 clocks (500 ns)
+   after the CPU lets go. The likely reason is a slow rise: the net has no
+   discrete pull-up on the schematic, only the supervisor's — 5 kΩ inside an
+   MCP130 (the datasheet in the repo), none in the MCP120 the schematic
+   names — against the capacitance of the CPU, DUART, button, Teensy and
+   breadboard wiring; the analyser saw about 300 ns of ringing at its lower
+   threshold. **Not yet measured** — a scope on the CPU's `/RESET` pin,
+   timing the rise to 2 V after the pulse, would settle it, and a stronger
+   pull-up (around 1 kΩ) would then stop it.
+
+   Whatever the cause, the bus cycle in flight as `/RESET` releases was
+   counted as one of the 8, so again the last byte of the reset PC came from
+   the SRAM, and `reset` hung after `resetting ...`. With the boot image's
+   vectors copied to RAM at 0 first, that byte is right wherever it comes
+   from.
 
 The lesson for anything that pulses `/RESET` from software: **make RAM at 0
 hold the same reset vectors as the NVRAM**, so the exact cycle on which

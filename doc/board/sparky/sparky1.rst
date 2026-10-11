@@ -206,10 +206,13 @@ scratch by ``trap_init()`` in ``arch/m68k/lib/traps.c``.
 
 Vectors 0 and 1 of the RAM table are left unused by ``trap_init()``.
 ``do_reset()`` fills them with the boot image's reset SSP and PC before it
-pulses ``/RESET``: on this board the ``RESET`` instruction resets the CPU as
-the pulse ends, and the boot override can then take the last byte of the reset
-PC from RAM at 0 rather than from the NVSRAM. With the same values in both,
-the vector fetch is right either way.
+pulses ``/RESET``. The ``RESET`` instruction itself does not reset a 68030,
+but the processor is reset if ``/RESET`` stays asserted at least eight clocks
+past the instruction's own pulse, and on this board it does — most likely
+because the line rises slowly through a weak pull-up. The CPU then fetches its
+reset vectors, and the boot override can take the last byte of the reset PC
+from RAM at 0 rather than from the NVSRAM. With the same values in both, the
+vector fetch is right either way.
 
 Reset
 -----
