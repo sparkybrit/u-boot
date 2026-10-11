@@ -862,6 +862,56 @@ addresses.
 `CFG_SYS_SDRAM_SIZE` is still 4 MB, although 8 MB is fitted. Raising it is a
 separate step, so that a fault can be pinned to one change or the other.
 
+### How U-Boot uses the SRAM
+
+U-Boot takes both ends of the SRAM: the vector table at the bottom, and its
+relocated code, heap and stack at the top. The load address sits in between,
+with room below it for a kernel to unpack into. With 4 MB configured:
+
+```
+0x01400000  ┐ end of configured RAM
+            │ U-Boot: relocated code, gd, board info   (from ~0x013b8000)
+            │ heap (256 KB) and stack, growing down
+~0x01370000 ┘
+            │ free: room for the uImage file (~1.4 MB)
+0x01200000  ← CONFIG_SYS_LOAD_ADDR: uImage file lands here
+            │ free: where bootm unpacks the kernel (~2 MB)
+0x01001000  ← kernel run address (mkimage -a)
+0x01010000    end of INIT_RAM (pre-relocation only, free afterwards)
+0x01000000  ← RAM vector table (1 KB), start of SRAM
+```
+
+**The U-Boot addresses are estimates.** `relocaddr` was `0x403b8000` on the
+old map and is expected at about `0x013b8000`, with the 256 KB heap
+(`CONFIG_SYS_MALLOC_LEN`) and the stack below it. Confirm them with `bdinfo`
+before relying on the figures that follow.
+
+**`CONFIG_SYS_LOAD_ADDR` is where the file lands, not where the kernel runs.**
+`load`/`fatload` with no address argument use `$loadaddr`, falling back to
+`CONFIG_SYS_LOAD_ADDR` (`fs/fs.c`); `bootm` with no argument looks there for
+the image (`boot/image-board.c`). `bootm` then unpacks the kernel to the load
+address in the uImage *header*, set by `mkimage -a`, and jumps to `mkimage -e`.
+
+| Address | Role | Set by |
+|---------|------|--------|
+| `0x01200000` | scratch: the raw uImage file | `CONFIG_SYS_LOAD_ADDR` |
+| `0x01001000` | where the kernel runs | `mkimage -a 0x01001000 -e 0x01001000` |
+
+The kernel goes at `0x01001000` because classic m68k links at `0x1000` with
+`PAGE_OFFSET` 0 — see the Linux boot section of the hardware project's notes.
+
+**Two size limits at 4 MB:**
+
+1. **The uImage file must fit below U-Boot** — roughly 1.4 MB from
+   `0x01200000`. A bigger load runs into the heap and stack.
+2. **The unpacked kernel must fit below the file** — about 2 MB from
+   `0x01001000` to `0x01200000`. A bigger kernel overwrites its own compressed
+   source while `bootm` is still reading it.
+
+Raising `CFG_SYS_SDRAM_SIZE` to 8 MB moves U-Boot to near `0x01800000` and
+lifts the first limit to about 5 MB. The second needs the load address moved
+up as well, e.g. to `0x01400000` — valid only at 8 MB.
+
 ## Repository layout (m68k-relevant paths)
 
 | Path | Purpose |
