@@ -78,7 +78,7 @@ trusting it.
 - `Kconfig`, `Makefile`, `sparky1.c` — board init, `checkboard()`, `dram_init()`
 - `configs/sparky1_defconfig` — full build configuration
 - `include/configs/sparky1.h` — legacy config header
-- `arch/m68k/dts/sparky1.dts` — device tree: XR68C681 DUART at 0x80000000 (UART, timer, GPIO)
+- `arch/m68k/dts/sparky1.dts` — device tree: XR68C681 DUART at 0x02000000 (UART, timer, GPIO)
 
 ### XR68C681 DUART drivers
 - `drivers/serial/xr68c681_serial.c` — serial driver (UCLASS_SERIAL)
@@ -89,7 +89,7 @@ trusting it.
 - Compatible strings: `exar,xr68c681` (serial), `exar,xr68c681_timer` (timer), `motorola,mc68681_gpio` (GPIO)
 
 ### CompactFlash / IDE
-- `arch/m68k/dts/sparky1.dts` — `ide@c0000000` node, `compatible = "u-boot,ide"`
+- `arch/m68k/dts/sparky1.dts` — `ide@3000000` node, `compatible = "u-boot,ide"`
 - `board/sparky/sparky1/sparky1.c` — `board_late_init()` probes the controller
 - Uses upstream `drivers/block/ide.c` in 8-bit mode, plus `ide_wait_drq()` so a
   late DRQ does not abort a transfer; see
@@ -136,7 +136,7 @@ The counter/timer runs at 100 Hz: N=0x0480 (1152), f = (3.6864 MHz / 16) / (2 ×
 
 ## CompactFlash / IDE — key implementation notes
 
-A CompactFlash card in True IDE mode hangs off `/DISKCS` at `0xC0000000`. It is
+A CompactFlash card in True IDE mode hangs off `/DISKCS` at `0x03000000`. It is
 driven by upstream's generic `drivers/block/ide.c`, which needed four changes
 to cope with the wiring.
 
@@ -144,7 +144,7 @@ to cope with the wiring.
 
 | Property | Value | Kconfig |
 |----------|-------|---------|
-| Base address | `0xC0000000` | `CONFIG_SYS_ATA_BASE_ADDR` |
+| Base address | `0x03000000` | `CONFIG_SYS_ATA_BASE_ADDR` |
 | Registers | 8, byte-wide, selected by A2–A0 | `CONFIG_SYS_ATA_STRIDE=0x1` |
 | Data port | offset 0, **8 bits** on D31–D24 | `CONFIG_SYS_ATA_DATA_8BIT=y` |
 | Devices | one, master only | `CONFIG_SYS_IDE_MAXDEVICE=0x1` |
@@ -839,6 +839,29 @@ which is fine, this *is* a fix. Once it lands upstream, drop the local change,
 remove it from the `ide.c` rebase note above so it stops being a rebase
 conflict, and `git worktree remove ~/Projects/u-boot-ide-fix`.
 
+## Memory map
+
+Decoded from **A25/A24** into four 16 MB quadrants, repeating every 64 MB
+(A26–A31 are not decoded). The board moved to this on 2026-10-10 for the
+sparky1-backplane, which carries only A0–A25; U-Boot followed on branch
+`sparky1-a25-a24-map`.
+
+| Region | Base | Chip select | U-Boot setting |
+|--------|------|-------------|----------------|
+| NVRAM (boot image) | `0x00000000` | `/ROMCS` | `CFG_SYS_FLASH_BASE` |
+| SRAM | `0x01000000` | `/RAMCS` | `CFG_SYS_SDRAM_BASE`, `CFG_SYS_INIT_RAM_ADDR` |
+| XR68C681 DUART | `0x02000000` | `/UARTCS` | `reg` in `sparky1.dts`, `CONFIG_DEBUG_UART_BASE` |
+| CompactFlash | `0x03000000` | `/DISKCS` | `CONFIG_SYS_ATA_BASE_ADDR` |
+
+**Older logs and notes use the old A31/A30 map** — SRAM `0x40000000`, DUART
+`0x80000000`, CF `0xC0000000`. Those are not aliases on today's board: all
+three decode as the NVRAM, so an old-map image or command writes into the boot
+image. Transcripts quoted below from before 2026-10-10 keep their original
+addresses.
+
+`CFG_SYS_SDRAM_SIZE` is still 4 MB, although 8 MB is fitted. Raising it is a
+separate step, so that a fault can be pinned to one change or the other.
+
 ## Repository layout (m68k-relevant paths)
 
 | Path | Purpose |
@@ -870,7 +893,7 @@ reset vector fetch (0x000004 → _start)
 arch/m68k/cpu/mc68030/start.S:_start
   ├─ %sr = 0x2700                                             disable all interrupts
   ├─ %a5 = __got_start                                        set %a5 to the linker's Global Offset Table in Flash
-  ├─ %sp = CFG_SYS_INIT_RAM_ADDR + CFG_SYS_INIT_RAM_SIZE      set %sp to top of the init ram area (0x4001:0000)
+  ├─ %sp = CFG_SYS_INIT_RAM_ADDR + CFG_SYS_INIT_RAM_SIZE      set %sp to top of the init ram area (0x0101:0000)
   ├─ common/init/board_init.c:board_init_f_alloc_reserve()    reserve space for global_data at top of init ram 
   ├─ common/init/board_init.c:board_init_f_init_reserve()     zero the global_data struct
   ├─ arch/m68k/cpu/mc68030/cpu_init.c:cpu_init_f()
@@ -1000,9 +1023,9 @@ common/board_r.c:initcall_run_r()
 
 The vector table in flash is **never copied to RAM**. Instead, `trap_init()` in `arch/m68k/lib/traps.c` builds a fresh table directly in RAM:
 
-- **Destination:** `CFG_SYS_SDRAM_BASE` = `0x40000000` (base of SDRAM)
+- **Destination:** `CFG_SYS_SDRAM_BASE` = `0x01000000` (base of SDRAM)
 - **Contents:** vectors 2–24 and 32–63 → `_exc_handler`; vectors 25–31 and 64–255 → `_int_handler` (all pointing to their relocated RAM addresses). Vectors 0 (initial SP) and 1 (reset PC) are not written.
-- **VBR set:** `setvbr(0x40000000)` at the end of `trap_init()`, called from `arch_initr_trap()` during `initcall_run_r()` in phase 2.
+- **VBR set:** `setvbr(0x01000000)` at the end of `trap_init()`, called from `arch_initr_trap()` during `initcall_run_r()` in phase 2.
 
 Before `setvbr` is called, VBR defaults to 0x000000 and the flash vector table handles any early exceptions.
 
@@ -1090,17 +1113,17 @@ icache
 dcache
 
 # Write with D-cache ON, disable, read back — write-through means memory is always current
-mw.l 0x40200000 0xdeadbeef 0x40
-md.l 0x40200000 8
+mw.l 0x01200000 0xdeadbeef 0x40
+md.l 0x01200000 8
 dcache off
-md.l 0x40200000 8
+md.l 0x01200000 8
 # Both reads must show 0xdeadbeef
 
 # Write new pattern with cache OFF, re-enable — dcache_enable() calls dcache_invalid()
 # so re-enable must flush any stale lines; if this reads 0xdeadbeef the invalidation is broken
-mw.l 0x40200000 0xcafebabe 0x40
+mw.l 0x01200000 0xcafebabe 0x40
 dcache on
-md.l 0x40200000 8
+md.l 0x01200000 8
 # Must show 0xcafebabe
 
 # I-cache toggle — a hang or reset here means pipeline state was corrupted on re-enable
@@ -1114,23 +1137,23 @@ dcache
 
 ```
 # Pre-fill both regions with matching data so cmp won't complain
-mw.l 0x40100000 0xdeadbeef 0x10000
-mw.l 0x40110000 0xdeadbeef 0x10000
+mw.l 0x01100000 0xdeadbeef 0x10000
+mw.l 0x01110000 0xdeadbeef 0x10000
 
 echo "--- caches OFF ---"
 icache off
 dcache off
-time mw.l 0x40100000 0x12345678 0x10000
-time cmp.l 0x40100000 0x40110000 0x8000
+time mw.l 0x01100000 0x12345678 0x10000
+time cmp.l 0x01100000 0x01110000 0x8000
 
 echo "--- caches ON ---"
 icache on
 dcache on
-time mw.l 0x40100000 0x12345678 0x10000
-time cmp.l 0x40100000 0x40110000 0x8000
+time mw.l 0x01100000 0x12345678 0x10000
+time cmp.l 0x01100000 0x01110000 0x8000
 ```
 
-The scratch addresses (0x40100000 / 0x40110000) sit in the middle of the 4 MB SDRAM region (0x40000000–0x403FFFFF), well below where U-Boot relocates to near the top. If both timed results round to zero, increase the count to `0x40000` (1 MB). The D-cache speedup is most visible on the `cmp` (read-heavy) operation; `mw` speedup is smaller because the 68030 D-cache is write-through.
+The scratch addresses (0x01100000 / 0x01110000) sit in the middle of the 4 MB SDRAM region (0x01000000–0x013FFFFF), well below where U-Boot relocates to near the top. If both timed results round to zero, increase the count to `0x40000` (1 MB). The D-cache speedup is most visible on the `cmp` (read-heavy) operation; `mw` speedup is smaller because the 68030 D-cache is write-through.
 
 ### CompactFlash verification
 
@@ -1181,7 +1204,7 @@ Then, at the prompt:
 ide info                          # re-report what was found
 part list ide 0                   # partition table
 ls ide 0:1 /                      # FAT directory listing
-load ide 0:1 0x40200000 /file     # read a file into SDRAM
+load ide 0:1 0x01200000 /file     # read a file into SDRAM
 ```
 
 #### Read/write integrity
@@ -1193,8 +1216,8 @@ block number and block count — and operate on the current device, which
     ide read  addr blk# cnt
     ide write addr blk# cnt
 
-The tests below use two 4 KB buffers at `0x40100000` and `0x40110000`. Those
-sit in the middle of SDRAM (`0x40000000`–`0x403FFFFF`), well above INIT_RAM
+The tests below use two 4 KB buffers at `0x01100000` and `0x01110000`. Those
+sit in the middle of SDRAM (`0x01000000`–`0x013FFFFF`), well above INIT_RAM
 and well below where U-Boot relocates to, so nothing live is at risk. Sizes
 line up as: 8 sectors × 512 B = 4096 B = `0x1000` bytes = `0x400` longwords,
 which is the count `mw.l` and `cmp.l` take.
@@ -1208,11 +1231,11 @@ a multi-sector burst:
 
 ```
 ide device 0
-mw.l 0x40100000 0xdeadbeef 0x80     # 0x80 longwords = 512 B = one sector
-mw.l 0x40110000 0x00000000 0x80     # clear dest: a failed read must not pass
-ide write 0x40100000 0x1000 0x1
-ide read  0x40110000 0x1000 0x1
-cmp.l 0x40100000 0x40110000 0x80
+mw.l 0x01100000 0xdeadbeef 0x80     # 0x80 longwords = 512 B = one sector
+mw.l 0x01110000 0x00000000 0x80     # clear dest: a failed read must not pass
+ide write 0x01100000 0x1000 0x1
+ide read  0x01110000 0x1000 0x1
+cmp.l 0x01100000 0x01110000 0x80
 ```
 
 Then 8 sectors in one command. This is worth doing separately: the card
@@ -1220,11 +1243,11 @@ re-asserts DRQ for each sector without being re-commanded, so it exercises
 the inter-sector turnaround that the single-sector path never reaches.
 
 ```
-mw.l 0x40100000 0xdeadbeef 0x400
-mw.l 0x40110000 0x00000000 0x400
-ide write 0x40100000 0x1000 0x8
-ide read  0x40110000 0x1000 0x8
-cmp.l 0x40100000 0x40110000 0x400
+mw.l 0x01100000 0xdeadbeef 0x400
+mw.l 0x01110000 0x00000000 0x400
+ide write 0x01100000 0x1000 0x8
+ide read  0x01110000 0x1000 0x8
+cmp.l 0x01100000 0x01110000 0x400
 ```
 
 A pass prints `Total of 1024 word(s) were the same` — `cmp` calls a `.l`
@@ -1232,7 +1255,7 @@ object a "word" regardless of the suffix, so that is 1024 longwords, not
 1024 16-bit words. A failure names both addresses and both values:
 
 ```
-word at 0x40100000 (0xdeadbeef) != word at 0x40110000 (0x00000000)
+word at 0x01100000 (0xdeadbeef) != word at 0x01110000 (0x00000000)
 ```
 
 `0xdeadbeef` is a poor pattern for spotting a sector landing at the wrong
@@ -1241,11 +1264,11 @@ copy 4 KB of U-Boot's own image out of NVRAM instead of filling a constant —
 it is varied, read-only and always present:
 
 ```
-cp.l 0x00001000 0x40100000 0x400
-mw.l 0x40110000 0x00000000 0x400
-ide write 0x40100000 0x1000 0x8
-ide read  0x40110000 0x1000 0x8
-cmp.l 0x40100000 0x40110000 0x400
+cp.l 0x00001000 0x01100000 0x400
+mw.l 0x01110000 0x00000000 0x400
+ide write 0x01100000 0x1000 0x8
+ide read  0x01110000 0x1000 0x8
+cmp.l 0x01100000 0x01110000 0x400
 ```
 
 **What a round-trip cannot catch.** Writing and reading through the same
@@ -1258,8 +1281,8 @@ The cheapest source is a card partitioned or formatted on a PC: LBA 0 ends
 with the boot signature `0x55 0xAA` at offset `0x1FE`.
 
 ```
-ide read 0x40100000 0x0 0x1
-md.w 0x401001fe 1
+ide read 0x01100000 0x0 0x1
+md.w 0x011001fe 1
 ```
 
 On big-endian m68k the byte at the lower address is the high half, so a
@@ -1323,7 +1346,7 @@ runs before they were spotted. Anything that reports pass/fail counts from this
 board needs to defend against them.
 
 1. **The console drops characters.** Blasting a command at 115200 with no flow
-   control makes the 16 MHz 68030 lose bytes mid-line — `mw.l 0x40180000 0
+   control makes the 16 MHz 68030 lose bytes mid-line — `mw.l 0x01180000 0
    0x20000` arrived as `mw.` and U-Boot answered with a usage message, leaving
    the buffer unpoisoned. Send commands character by character (~1.5 ms apart)
    and **verify the echoed first line matches what was sent**, retrying if not.
@@ -1405,9 +1428,10 @@ Everything from LBA 2048 to 6015 is zeros. So:
    it to its LBA. Read the source longwords **big-endian** so the values
    reproduce the on-disk byte order through m68k's `mw.l`.
 
-Keep the buffer well below `relocaddr` (check `bdinfo`; it is around
-`0x403b8000`), so `0x40100000` is safe. The whole run is ~157 commands and
-takes about two minutes, dominated by the metadata zeroing.
+Keep the buffer well below `relocaddr` (check `bdinfo`; it was
+`0x403b8000` on the old map, so expect about `0x013b8000` now), so
+`0x01100000` is safe. The whole run is ~157 commands and takes about two
+minutes, dominated by the metadata zeroing.
 
 This is also the only real test of the **write** path: format from the SBC,
 then confirm Linux mounts the result read-write and can allocate clusters in
@@ -1415,37 +1439,37 @@ it. A round-trip through this driver alone cannot detect a symmetric fault.
 
 ### INIT_RAM relocation verification
 
-After relocation, U-Boot must use only the relocated `gd`, stack, and heap in the upper SDRAM — nothing should touch INIT_RAM (0x40000000–0x4000FFFF, the bottom 64 KB of SDRAM) again.
+After relocation, U-Boot must use only the relocated `gd`, stack, and heap in the upper SDRAM — nothing should touch INIT_RAM (0x01000000–0x0100FFFF, the bottom 64 KB of SDRAM) again.
 
-**Important:** the exception vector table lives at `0x40000000–0x400003FF` (256 vectors × 4 bytes). Do **not** poison that region — any exception during the test would vector to the poison value and hard-crash. Start poisoning at `0x40000400` (the first byte after the table). The usable poison range is therefore `0x40000400–0x4000FFFF` = 63 KB − 0 = 0x3F00 longwords.
+**Important:** the exception vector table lives at `0x01000000–0x010003FF` (256 vectors × 4 bytes). Do **not** poison that region — any exception during the test would vector to the poison value and hard-crash. Start poisoning at `0x01000400` (the first byte after the table). The usable poison range is therefore `0x01000400–0x0100FFFF` = 63 KB − 0 = 0x3F00 longwords.
 
-Poison from `0x40000400` with a distinctive value, write the same pattern to a reference area above it, exercise U-Boot, then `cmp` the two regions. Any address reported by `cmp` is a location that was written after poisoning — a stale pointer or residual stack/heap use.
+Poison from `0x01000400` with a distinctive value, write the same pattern to a reference area above it, exercise U-Boot, then `cmp` the two regions. Any address reported by `cmp` is a location that was written after poisoning — a stale pointer or residual stack/heap use.
 
 ```
-# Poison INIT_RAM, skipping the vector table at 0x40000000–0x400003FF
-# 0x3F00 longwords = 63 KB starting at 0x40000400
-mw.l 0x40000400 0xdeadc0de 0x3f00
+# Poison INIT_RAM, skipping the vector table at 0x01000000–0x010003FF
+# 0x3F00 longwords = 63 KB starting at 0x01000400
+mw.l 0x01000400 0xdeadc0de 0x3f00
 
-# Write same pattern to reference area (above INIT_RAM, below load address at 0x40200000)
-mw.l 0x40020400 0xdeadc0de 0x3f00
+# Write same pattern to reference area (above INIT_RAM, below load address at 0x01200000)
+mw.l 0x01020400 0xdeadc0de 0x3f00
 
-# Confirm relocated gd, sp, and heap are all up near 0x403xxxxx — not in INIT_RAM
+# Confirm relocated gd, sp, and heap are all up near 0x013xxxxx — not in INIT_RAM
 bdinfo
 
 # Exercise U-Boot to trigger any residual INIT_RAM access
 printenv
 dm tree
-md.l 0x40000400 4
+md.l 0x01000400 4
 
 # Compare — "Total of 16128 word(s) were the same" means INIT_RAM is clean
 # (cmp calls a .l object a "word"; that is 16128 longwords)
 # Any reported address means something still touched INIT_RAM after relocation
-cmp.l 0x40000400 0x40020400 0x3f00
+cmp.l 0x01000400 0x01020400 0x3f00
 ```
 
-If `cmp` flags an address, the offset from `0x40000400` locates which part of INIT_RAM was touched: offsets near zero suggest a stale heap or BSS pointer; offsets near `0xBBFC` (= `0xF000 - 0x400`) suggest a leftover stack reference (the initial stack and `gd` struct were reserved at the top of INIT_RAM by `board_init_f_alloc_reserve()`).
+If `cmp` flags an address, the offset from `0x01000400` locates which part of INIT_RAM was touched: offsets near zero suggest a stale heap or BSS pointer; offsets near `0xBBFC` (= `0xF000 - 0x400`) suggest a leftover stack reference (the initial stack and `gd` struct were reserved at the top of INIT_RAM by `board_init_f_alloc_reserve()`).
 
-Run `bdinfo` before poisoning to confirm that `gd`, `sp`, and the malloc arena are all well above `0x4000FFFF`. If any of them appear in the `0x40000xxx` range, relocation did not complete correctly and poisoning would corrupt live data.
+Run `bdinfo` before poisoning to confirm that `gd`, `sp`, and the malloc arena are all well above `0x0100FFFF`. If any of them appear in the `0x01000xxx` range, relocation did not complete correctly and poisoning would corrupt live data.
 
 ## Key differences: classic m68k vs ColdFire
 
