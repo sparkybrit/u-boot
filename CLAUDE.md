@@ -1,10 +1,10 @@
 # U-Boot for Sparky1 SBC
 
-This is a fork of U-Boot (currently rebased to v2026.04) adding support for the **sparky1** — a custom 68030-based single-board computer. The upstream project supports the m68k architecture only for ColdFire (MCF) CPUs; this fork extends it with classic 68030 CPU support and drivers for the XR68C681 DUART.
+This is a fork of U-Boot (currently rebased to v2026.10) adding support for the **sparky1** — a custom 68030-based single-board computer. The upstream project supports the m68k architecture only for ColdFire (MCF) CPUs; this fork extends it with classic 68030 CPU support and drivers for the XR68C681 DUART.
 
 ## Branch layout
 
-All custom work is on the `sparky` branch — currently ~29 commits on top of an
+All custom work is on the `sparky` branch — currently ~60 commits on top of an
 upstream release. `master` is a pristine mirror of upstream
 (`https://github.com/u-boot/u-boot.git`) with none of your changes on it, kept
 only as a local reference. **Merging work into `master` would break
@@ -20,7 +20,7 @@ is *not* a prerequisite — what matters is having the tags:
 ```bash
 git fetch upstream --tags     # --tags is required; a plain fetch may not bring them
 git checkout sparky
-git rebase v2026.07           # one release at a time, never an -rc tag
+git rebase v2027.01           # one release at a time, never an -rc tag
 ```
 
 `git describe --tags --abbrev=0 sparky` reports the release you are currently
@@ -49,6 +49,14 @@ added an entry, keep both:
 `arch/m68k/Kconfig`, `arch/m68k/lib/Makefile`, `drivers/block/Kconfig`,
 `drivers/serial/{Kconfig,Makefile}`, `drivers/gpio/{Kconfig,Makefile}`,
 `drivers/timer/Kconfig`, `doc/board/index.rst`.
+
+For the v2026.07 → v2026.10 hop (2026-10-11) it was 11 of 3647. Two were the
+MMC leftover described below, fixed before rebasing; the remaining nine were
+the registration lists, `drivers/block/ide.c` and `serial_mcf.c`. **All 59
+commits applied with no conflicts at all**, and the result was checked by
+comparing the fork's own changes before and after
+(`git diff v2026.07 sparky` against `git diff v2026.10 sparky-v2026.10`, sorted
+`+`/`-` lines): identical, 51 files, +3971/−33.
 
 If a file shows up in that intersection and has nothing to do with sparky1,
 suspect a leftover rather than a conflict to resolve — but restore it to the
@@ -606,25 +614,32 @@ and
 the `strlcpy()` size fix in `ide_probe()` (upstream passes `BLK_*_SIZE` where
 the buffers are `BLK_*_SIZE + 1`, which truncates a maximum-length string by
 one character - it printed `HDX 5.08` as `HDX 5.0`). That last one is an
-upstream bug, not a sparky1 change, and **is fixed upstream from
-v2026.10-rc1** (`0b4c421190a`). Keep it until `sparky` is rebased onto a tag
-that has it: on v2026.07 dropping it would bring the truncation back. On the
-v2026.10 hop the `ide.c` part of local commit `5dab7117602` is identical to
-upstream's and should merge to nothing — check with
-`git diff v2026.10 sparky -- drivers/block/ide.c | grep strlcpy`, which should
-then print nothing.
+upstream bug, not a sparky1 change, and **is fixed upstream in `next`**
+(`0b4c421190a`), so the first release with it is **v2027.01**. It is *not* in
+v2026.10. Keep the local copy until `sparky` is rebased onto v2027.01; before
+that, dropping it brings the truncation back. On that hop the `ide.c` part of
+the local commit is identical to upstream's and should merge to nothing —
+check with `git diff v2027.01 sparky -- drivers/block/ide.c | grep strlcpy`,
+which should then print nothing.
+
+To check whether a fix is in a release, ask git directly —
+`git merge-base --is-ancestor <commit> <tag> && echo yes` — rather than reading
+`git tag --contains` output among other commands' output. A misread of exactly
+that put "in v2026.10" into these notes on 2026-10-11; the v2026.10 rebase
+showed it was wrong.
 
 ### Upstream submission — the `strlcpy()` fix
 
-**Accepted and merged.** Sent 2026-08-29; Patchwork state `accepted`; landed
-upstream as `0b4c421190a` ("ide: Fix truncation of device strings by one
-character"), committed by Tom Rini on 2026-09-15, and in every tag from
-`v2026.10-rc1` on, including the `v2026.10` release. Patch-identical to what was
-sent. The worktree and the `ide-strlcpy-fix` branch were removed on 2026-10-11;
+**Accepted and merged into `next`.** Sent 2026-08-29; Patchwork state
+`accepted`; landed as `0b4c421190a` ("ide: Fix truncation of device strings by
+one character"), committed by Tom Rini on 2026-09-15 to `next`, during the
+v2026.10 `-rc` period, and merged into `main` after the v2026.10 release. It is
+**not in v2026.10**; the first release with it is v2027.01. Patch-identical to
+what was sent. The worktree and the `ide-strlcpy-fix` branch were removed on 2026-10-11;
 the `sent/…-v1` tag is kept as the record of exactly what went out.
 
 This was an **upstream U-Boot bug**, not a sparky1 change, so it went to the
-mailing list and drops out of this fork on the v2026.10 rebase — see the rebase
+mailing list and drops out of this fork on the v2027.01 rebase — see the rebase
 note above.
 
 | | |
