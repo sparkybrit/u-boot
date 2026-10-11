@@ -29,34 +29,33 @@ DECLARE_GLOBAL_DATA_PTR;
 
 int do_reset(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 {
-	void (*reset_entry)(void);
+	void (*rom_reset)(void);
 
 	/*
 	 * A 68030 cannot reset itself.  The RESET instruction drives the
 	 * /RESET pin to reset external devices, but the CPU deliberately
 	 * ignores its own assertion, and this board has no reset line under
-	 * software control.  So reset the peripherals, undo the state
-	 * board_init_r set up behind the boot code's back -- vector base,
-	 * caches, interrupt mask -- and re-enter through the reset vector
-	 * in flash, exactly where a power-on reset would start.
+	 * software control.  So undo the state board_init_r set up behind
+	 * the boot code's back -- vector base, caches, interrupt mask -- and
+	 * hand over to reset_from_rom(), which pulses /RESET and re-enters
+	 * at _start, exactly where a power-on reset would.
 	 *
-	 * Read the vector before touching anything: after the caches are off
-	 * and /RESET has been pulsed, this wants to be a jump and nothing
-	 * else.  Vector 1 (offset 4) holds the reset PC.
+	 * It must run from the boot image, not from this relocated copy:
+	 * see reset_from_rom() in start.S.  Its link-time address is the
+	 * relocated one less the relocation offset.
 	 */
-	reset_entry = (void (*)(void))(*(volatile ulong *)4);
+	rom_reset = (void (*)(void))((ulong)reset_from_rom - gd->reloc_off);
 
 	puts("resetting ...\n");
 	udelay(50000);			/* let the console drain first */
 
 	__asm__ __volatile__(
 		"move.w	#0x2700,%%sr\n\t"	/* mask all interrupts        */
+		"movec	%1,%%vbr\n\t"		/* the boot image's vectors   */
 		"moveq	#0,%%d0\n\t"
-		"movec	%%d0,%%vbr\n\t"	/* vectors back at 0x00000000 */
 		"movec	%%d0,%%cacr\n\t"	/* caches off                 */
-		"reset\n\t"			/* pulse /RESET to peripherals */
 		"jmp	(%0)\n"
-		: : "a" (reset_entry) : "d0", "memory");
+		: : "a" (rom_reset), "d" (CONFIG_TEXT_BASE) : "d0", "memory");
 
 	/* not reached */
 	return 0;

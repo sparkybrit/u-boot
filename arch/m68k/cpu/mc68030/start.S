@@ -88,6 +88,17 @@ _start:
 	nop
 	move.w	#0x2700,%sr
 
+#if !defined(CONFIG_MONITOR_IS_IN_RAM)
+	/*
+	 * VBR is 0 after reset.  If the boot image is not at 0 - on sparky1
+	 * the SRAM is, and holds nothing until trap_init() fills it after
+	 * relocation - an early exception would vector through garbage, so
+	 * use the table at the front of this image until then.
+	 */
+	move.l	#_vectors, %d0
+	movec	%d0, %vbr
+#endif
+
 	/* put relocation table address to a5 */
 	move.l	#__got_start, %a5
 
@@ -269,6 +280,26 @@ clear_bss:
 	move.l	%a0,-(%sp)		/* dest_addr */
 	move.l	%d0,-(%sp)		/* gd */
 	jsr	(%a1)
+
+/******************************************************************************/
+
+/*
+ * void reset_from_rom(void)
+ *
+ * Pulse /RESET to the peripherals and restart at _start.  Called by
+ * do_reset() at its link-time address, so that it executes from the boot
+ * image and not from the relocated copy in RAM.
+ *
+ * On sparky1 that matters: /RESET re-arms the board's /BOOT logic, which
+ * then sends the next 8 bus cycles in the bottom quadrant - the SRAM, where
+ * U-Boot runs - to the NVRAM.  Every cycle from here until _start has long
+ * finished counting them is an instruction fetch from the NVRAM's own
+ * quadrant, which /BOOT does not touch.
+ */
+.globl reset_from_rom
+reset_from_rom:
+	reset
+	jmp	_start
 
 /******************************************************************************/
 
