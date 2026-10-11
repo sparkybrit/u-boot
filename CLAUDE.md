@@ -932,10 +932,10 @@ with room below it for a kernel to unpack into. With 8 MB configured:
 
 ```
 0x01800000  ┐ end of SRAM
-0x017c3000  │ U-Boot: relocated code                 (relocaddr)
+0x017c2000  │ U-Boot: relocated code                 (relocaddr)
             │ heap (256 KB), board info, device tree
-0x01783bd8  │   boot_params
-0x01781aa0  │   fdt_blob
+0x01782bd8  │   boot_params
+0x01780aa0  │   fdt_blob
             │ gd and the stack, growing down
             ┘
             │ free: room for the uImage file (~3.5 MB)
@@ -946,9 +946,11 @@ with room below it for a kernel to unpack into. With 8 MB configured:
 0x01000000  ← RAM vector table (1 KB), start of SRAM
 ```
 
-**Measured with `bdinfo` on 2026-10-11** (build `2ef71b540b88`): `relocaddr`
-`0x017c3000`, `boot_params` `0x01783bd8`, `fdt_blob` `0x01781aa0` — each
-exactly 4 MB above its value at 4 MB. `bdinfo` reports neither the heap's
+**Measured with `bdinfo` on 2026-10-11** on v2026.10 (build `79b9f7b21533`):
+`relocaddr` `0x017c2000`, `boot_params` `0x01782bd8`, `fdt_blob` `0x01780aa0`.
+On v2026.07 (build `2ef71b540b88`) all three were 4 KB higher — `0x017c3000`,
+`0x01783bd8`, `0x01781aa0`, each exactly 4 MB above its value at 4 MB — the
+v2026.10 image being slightly larger. `bdinfo` reports neither the heap's
 bounds nor the stack pointer on this port, so only those three are measured;
 treat the free space above `0x01400000` as about 3.5 MB less whatever the stack
 uses. `relocaddr` moves with the image size, so recheck after big changes.
@@ -1556,7 +1558,7 @@ Everything from LBA 2048 to 6015 is zeros. So:
    reproduce the on-disk byte order through m68k's `mw.l`.
 
 Keep the buffer well below `relocaddr` (check `bdinfo`; it was
-`0x017c3000` with 8 MB on 2026-10-11), so `0x01100000` is safe. The whole run is ~157 commands and takes about two
+`0x017c2000` with 8 MB on v2026.10), so `0x01100000` is safe. The whole run is ~157 commands and takes about two
 minutes, dominated by the metadata zeroing.
 
 This is also the only real test of the **write** path: format from the SBC,
