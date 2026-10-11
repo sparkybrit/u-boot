@@ -984,9 +984,22 @@ Three things on the U-Boot side follow from it:
    MCP130 (the datasheet in the repo), none in the MCP120 the schematic
    names — against the capacitance of the CPU, DUART, button, Teensy and
    breadboard wiring; the analyser saw about 300 ns of ringing at its lower
-   threshold. **Not yet measured** — a scope on the CPU's `/RESET` pin,
-   timing the rise to 2 V after the pulse, would settle it, and a stronger
-   pull-up (around 1 kΩ) would then stop it.
+   threshold.
+
+   **Measured 2026-10-11 on the Rigol** (CH1 on the CPU's `/RESET` pin,
+   U-Boot `reset`, trace smoothed over 42 ns): an RC-shaped rise from
+   0.06 V to 4.89 V, time constant about 0.6 µs — about 5 kΩ against
+   roughly 120 pF. From the moment the CPU lets go it reaches 0.8 V (the
+   68030's guaranteed low) after 125 ns, 2 clocks; 2.0 V (guaranteed high)
+   after 365 ns, 5.8 clocks; 2.4 V after 480 ns, 7.7 clocks; 90% after
+   1.4 µs. The line also carries about ±0.3 V of noise, so the band where
+   the input could read either way stretches to about 7–8 clocks.
+   **Borderline against the manual's eight clocks, not a clean
+   confirmation**: slow enough to explain the reset, since eight is the
+   guaranteed figure and the CPU may act on less, but not proof. Some of the
+   noise may be the probe's ground lead. The direct test is a stronger
+   pull-up (about 1 kΩ, which would pass 2.0 V within a clock): if `reset`
+   then stops producing a fresh vector fetch, the slow rise was the cause.
 
    Whatever the cause, the bus cycle in flight as `/RESET` releases was
    counted as one of the 8, so again the last byte of the reset PC came from
