@@ -846,6 +846,13 @@ Decoded from **A25/A24** into four 16 MB quadrants, repeating every 64 MB
 sparky1-backplane, which carries only A0–A25; U-Boot followed on branch
 `sparky1-a25-a24-map`.
 
+**Checked on the board 2026-10-11** (build `0f130755507`, card
+`SDCFXPS-064G`): boots to the prompt, probes the CF; `time sleep 1` gives
+1.000 s, so the timer interrupt works through the vector table at
+`0x01000000`; the INIT_RAM poison test is clean (16128 longwords);
+LBA 0 reads `55aa`; `part list`, `ls` and `load` to `${loadaddr}` all work;
+and `reset` comes back through a full boot. No CF writes were tested.
+
 | Region | Base | Chip select | U-Boot setting |
 |--------|------|-------------|----------------|
 | NVRAM (boot image) | `0x00000000` | `/ROMCS` | `CFG_SYS_FLASH_BASE` |
@@ -870,10 +877,13 @@ with room below it for a kernel to unpack into. With 4 MB configured:
 
 ```
 0x01400000  ┐ end of configured RAM
-            │ U-Boot: relocated code, gd, board info   (from ~0x013b8000)
-            │ heap (256 KB) and stack, growing down
-~0x01370000 ┘
-            │ free: room for the uImage file (~1.4 MB)
+0x013c3000  │ U-Boot: relocated code                 (relocaddr)
+            │ heap (256 KB), board info, device tree
+0x01383bd8  │   boot_params
+0x01381aa0  │   fdt_blob
+            │ gd and the stack, growing down
+            ┘
+            │ free: room for the uImage file (~1.5 MB)
 0x01200000  ← CONFIG_SYS_LOAD_ADDR: uImage file lands here
             │ free: where bootm unpacks the kernel (~2 MB)
 0x01001000  ← kernel run address (mkimage -a)
@@ -881,10 +891,12 @@ with room below it for a kernel to unpack into. With 4 MB configured:
 0x01000000  ← RAM vector table (1 KB), start of SRAM
 ```
 
-**The U-Boot addresses are estimates.** `relocaddr` was `0x403b8000` on the
-old map and is expected at about `0x013b8000`, with the 256 KB heap
-(`CONFIG_SYS_MALLOC_LEN`) and the stack below it. Confirm them with `bdinfo`
-before relying on the figures that follow.
+**Measured with `bdinfo` on 2026-10-11** (build `0f130755507`): `relocaddr`
+`0x013c3000`, `boot_params` `0x01383bd8`, `fdt_blob` `0x01381aa0`. `bdinfo`
+reports neither the heap's bounds nor the stack pointer on this port, so only
+those three are measured; treat the free space above `0x01200000` as about
+1.5 MB less whatever the stack uses. `relocaddr` moves with the image size — it was
+`0x403b8000` on the old map with a larger build — so recheck after big changes.
 
 **`CONFIG_SYS_LOAD_ADDR` is where the file lands, not where the kernel runs.**
 `load`/`fatload` with no address argument use `$loadaddr`, falling back to
@@ -902,7 +914,7 @@ The kernel goes at `0x01001000` because classic m68k links at `0x1000` with
 
 **Two size limits at 4 MB:**
 
-1. **The uImage file must fit below U-Boot** — roughly 1.4 MB from
+1. **The uImage file must fit below U-Boot** — roughly 1.5 MB from
    `0x01200000`. A bigger load runs into the heap and stack.
 2. **The unpacked kernel must fit below the file** — about 2 MB from
    `0x01001000` to `0x01200000`. A bigger kernel overwrites its own compressed
@@ -1479,8 +1491,7 @@ Everything from LBA 2048 to 6015 is zeros. So:
    reproduce the on-disk byte order through m68k's `mw.l`.
 
 Keep the buffer well below `relocaddr` (check `bdinfo`; it was
-`0x403b8000` on the old map, so expect about `0x013b8000` now), so
-`0x01100000` is safe. The whole run is ~157 commands and takes about two
+`0x013c3000` on 2026-10-11), so `0x01100000` is safe. The whole run is ~157 commands and takes about two
 minutes, dominated by the metadata zeroing.
 
 This is also the only real test of the **write** path: format from the SBC,
