@@ -51,9 +51,21 @@ added an entry, keep both:
 `drivers/timer/Kconfig`, `doc/board/index.rst`.
 
 If a file shows up in that intersection and has nothing to do with sparky1,
-suspect a leftover rather than a conflict to resolve. Two MMC files were in
-this list until they were traced back to a revert that had not fully landed —
-one of them referenced a symbol that does not exist anywhere in the tree.
+suspect a leftover rather than a conflict to resolve — but restore it to the
+tag `sparky` is **actually based on**, not the one it came from. The two MMC
+files are the cautionary case. `cmd/mmc.c` and `drivers/mmc/mmc.c` carried
+two changes that survived an incomplete revert, and on 2026-08-27 commit
+`58007926e80` "restored them to upstream" — to their v2026.04 content, on a
+branch already rebased onto v2026.07. Upstream had made exactly those two
+changes in v2026.07 (`67fc5052285`, eMMC 5.1B; `6f7d976317c`, a trailing
+space), so the cleanup silently reverted them, and the two files showed up
+again when sizing the v2026.10 hop. Its stated reason was wrong too:
+`MMC_VERSION_5_1B` "not defined anywhere" was true of v2026.04 only;
+v2026.07's `include/mmc.h` defines it. Fixed 2026-10-11 by restoring both
+files from v2026.07 (`git checkout v2026.07 -- <files>`). Sparky1 does not
+build MMC, so the board was never affected. Check with
+`git diff <base-tag> sparky -- <file>`, which must be empty for a file sparky1
+does not touch.
 
 `drivers/block/ide.c` is a modified upstream file and *will* conflict on some
 future hop — see the rebase note in the CompactFlash section for exactly what
