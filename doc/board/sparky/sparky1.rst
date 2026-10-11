@@ -17,7 +17,7 @@ Hardware
   counter/timer, GPIO)
 * NVSRAM: Dallas DS1250Y, 512 KB at 0x00000000 — holds the vector table and
   U-Boot itself
-* SDRAM: 4 MB at 0x01000000
+* SDRAM: 8 MB at 0x01000000, two banks of 4 MB selected by A22
 * CompactFlash: True IDE mode, 8 registers at 0x03000000
 
 An address decoder splits each 64 MB into four 16 MB quadrants from A25/A24,
@@ -37,7 +37,7 @@ one chip select each. A26-A31 are not decoded, so the map repeats every
      - /ROMCS
    * - SDRAM
      - 0x01000000
-     - 4 MB
+     - 8 MB
      - /RAMCS
    * - XR68C681 DUART
      - 0x02000000
