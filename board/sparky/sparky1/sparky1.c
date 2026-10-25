@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <timer.h>
 #include <xr68c681.h>
+#include <asm/bootinfo.h>
 #include <asm/global_data.h>
 #include <asm/immap.h>
 #include <asm/io.h>
@@ -19,6 +20,20 @@
 DECLARE_GLOBAL_DATA_PTR;
 
 extern U_BOOT_DRIVER(xr68c681_timer);
+
+/*
+ * Linux machine type for the bootinfo. Not assigned upstream: it must
+ * match MACH_SPARKY1 in the kernel's arch/m68k/include/uapi/asm/bootinfo.h.
+ */
+#define MACH_SPARKY1	15
+
+void board_bootinfo_types(struct m68k_bootinfo_types *t)
+{
+	t->machtype = MACH_SPARKY1;
+	t->cputype = CPU_68030;
+	t->fputype = 0;		/* no FPU fitted */
+	t->mmutype = MMU_68030;
+}
 
 int checkboard(void) 
 {
