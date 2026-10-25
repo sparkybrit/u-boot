@@ -6,4 +6,4 @@
 # ccflags-y += -DET_DEBUG
 
 extra-y	= start.o
-obj-y	= interrupts.o cpu.o speed.o cpu_init.o
+obj-y	= interrupts.o cache.o cpu.o speed.o cpu_init.o
