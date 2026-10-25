@@ -167,6 +167,7 @@ to cope with the wiring.
 |----------|-------|---------|
 | Base address | `0x03000000` | `CONFIG_SYS_ATA_BASE_ADDR` |
 | Registers | 8, byte-wide on D31–D24, selected by A2–A0 | `CONFIG_SYS_ATA_STRIDE=0x1` |
+| Control block | alternate status / device control at `+0xE` (`-CS1` = !A3, `cfmanager` revision 05) | `CONFIG_SYS_ATA_ALT_OFFSET=0x8` |
 | Data port | offset 0, **16 bits** on D31–D16, word accesses only | `CONFIG_SYS_ATA_DATA_8BIT` **not** set |
 | Devices | one, master only | `CONFIG_SYS_IDE_MAXDEVICE=0x1` |
 
@@ -244,16 +245,29 @@ This matches the reference implementation in the hardware project's
 `config` @ 0, `serial_no` @ 20, `fw_rev` @ 46, `model` @ 54, `lba_capacity`
 @ 120, `command_set_2` @ 166.
 
-### CS1 is not decoded — keep CONFIG_ATAPI off
+### The control block — reachable since `cfmanager` revision 05
 
-Only A2–A0 reach the card, so the alternate status and device control
-registers are unreachable. `ATA_DEV_CTL` has exactly one user in the driver,
-`atapi_wait_mask()`, which is compiled out unless `CONFIG_ATAPI` is set —
-hence `CONFIG_SYS_ATA_DATA_8BIT` carries `depends on !ATAPI`. **With the
-16-bit port that guard is gone** — nothing stops `CONFIG_ATAPI` being enabled
-now, so do not. `RESET–` is not
-software-controlled either, so `CONFIG_IDE_RESET` stays off and there is no
-`ide_set_reset()`.
+**Since 2026-10-25** the card's `-CS0` is A3 and `-CS1` is !A3 (`cfmanager`
+revision 05, pin 23), so the control block's one register — alternate status
+on read, device control on write — sits at `0x0300000E`. `ATA_DEV_CTL` is
+`CONFIG_SYS_ATA_ALT_OFFSET + 6 × stride`, hence `ALT_OFFSET = 0x8`. Offsets
+`+8`–`+D` are not registers; never touch them. Before revision 05 `-CS0` was
+tied low and `-CS1` high, so the block was unreachable.
+
+`ATA_DEV_CTL` has exactly one user in the driver, `atapi_wait_mask()`, which
+is compiled out unless `CONFIG_ATAPI` is set, so the offset does not change
+the sparky1 image today. It is there for anything that does use it, and it
+matches the control resource Linux's `pata_platform` will want.
+
+**Checked on the board 2026-10-25** (card `SDCFXPS-064G`): `md.b 0x0300000e 1`
+reads `50`, the same as status at `+7`; with sector count and LBA low set to
+`a5`/`5a`, writing `0x06` then `0x02` to device control (SRST with nIEN, then
+nIEN alone) left the reset signature `01 01 00 00` in sector count/LBA, and
+the device register read `a0`. `ide reset` then probed the card normally and
+LBA 0 still read `55aa`.
+
+`RESET–` is still not software-controlled — it is on the board's `/RESET` —
+so `CONFIG_IDE_RESET` stays off and there is no `ide_set_reset()`.
 
 ### Throughput
 
@@ -1370,16 +1384,21 @@ prints `Verified.` with the NVRAM untouched. A changed banner, or
   `/dev/ttyUSB0` stays put across a board power cycle; `/dev/ttyACM0`
   disappearing and reappearing is what marks one. A script that waits for the
   console to re-enumerate after power-on will wait forever.
-- **`reset` pulses /RESET, `ide reset` does not.** If the card's reset is on
-  that net — believed so, but see the stuck-busy card below — that makes
-  `reset` a far better proxy for a cold boot.
+- **`reset` pulses /RESET, `ide reset` does not.** The card's `-RESET` (CF
+  pin 41) is on the board's `/RESET` net (the hardware project's CF connector
+  table), so `reset` hard-resets the card too and is a far better proxy for a
+  cold boot. The `RESET` instruction takes 518 clocks (MC68030 User's Manual,
+  instruction timing table), nearly all of them with the line driven — ~32 µs
+  at 16 MHz, against the card's 10 µs minimum reset width (SanDisk
+  manual, `Tw (RESET)`).
 - The `/RESET` pulse `nvram_write` issues after a successful write still works
   and is the only option if the board is wedged past the console.
 - **A CF card a test left busy may need a power cycle.** On 2026-10-11, after
   a hardware-project test, U-Boot's probe printed `Bus 0: ....` indefinitely —
   the card reporting BSY — through the programmer's `/RESET` pulse; a power
-  cycle cleared it. Whether the card's own reset is on the `/RESET` net is not
-  recorded in the schematic, which does not show the CF.
+  cycle cleared it. The card's `-RESET` is on that net (and was then — the
+  adapter with that wiring went in on 2026-10-09), so a hardware reset did
+  not clear it, and an SRST through device control probably would not either.
 - **Do not swap the CF card with the power on.** A hot insert put the board
   into a continuous `Bogus External Interrupt Vector 144` storm, and NVRAM
   reads through the programmer went unstable — three reads of the same KB

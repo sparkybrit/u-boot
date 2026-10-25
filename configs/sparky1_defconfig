@@ -49,9 +49,10 @@ CONFIG_MC68681_GPIO=y
 # CF in True IDE mode at 0x03000000: 8 byte-wide registers selected by A2-A0
 # with a 16-bit data port at offset 0: cfmanager revision 04 wires CF D0-D7
 # to D31-D24 and D8-D15 to D23-D16, and takes only word accesses there.  The
-# command registers stay byte-wide on D31-D24.  Master only - there is no slave select, and
-# CS1 (alternate status / device control) is not decoded, which is fine as
-# long as CONFIG_ATAPI stays off since that is its only user.
+# command registers stay byte-wide on D31-D24.  Master only - there is no slave select.
+# The control block is on -CS1 = !A3 (cfmanager revision 05): alternate status
+# / device control at offset 0xE, so ALT_OFFSET = 0xE - 6 * stride.
+# Offsets 0x8-0xD are not registers.
 CONFIG_BOARD_LATE_INIT=y
 CONFIG_CMD_IDE=y
 CONFIG_SYS_IDE_MAXBUS=0x1
@@ -61,7 +62,7 @@ CONFIG_SYS_ATA_IDE0_OFFSET=0x0
 CONFIG_SYS_ATA_STRIDE=0x1
 CONFIG_SYS_ATA_DATA_OFFSET=0x0
 CONFIG_SYS_ATA_REG_OFFSET=0x0
-CONFIG_SYS_ATA_ALT_OFFSET=0x0
+CONFIG_SYS_ATA_ALT_OFFSET=0x8
 # Some cards report a bogus LBA28 capacity in words 60/61 and the real one
 # in the LBA48 words 100-103; without this U-Boot only ever reads 60/61.
 CONFIG_LBA48=y
