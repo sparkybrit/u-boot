@@ -1141,6 +1141,8 @@ int bootm_run_states(struct bootm_info *bmi, int states)
 	/* Check for unsupported subcommand. */
 	if (ret) {
 		printf("subcommand failed (err=%d)\n", ret);
+		if (iflag)
+			enable_interrupts();
 		return ret;
 	}
 
