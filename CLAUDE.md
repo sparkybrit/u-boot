@@ -94,6 +94,8 @@ trusting it.
   masks interrupts and turns both caches off before `bootm` enters an OS —
   see [Phase 3](#phase-3--handing-over-to-an-os-bootm)
 - `interrupts.c` — interrupt controller init
+- `cache.c` — `icache_*()`/`dcache_*()` through the 68030 CACR; the ColdFire
+  `arch/m68k/lib/cache.c` is not built for the 68030
 - `speed.c` — clock/speed reporting
 
 ### Sparky1 board — `board/sparky/sparky1/`
@@ -121,8 +123,20 @@ trusting it.
 
 ### Modified upstream files
 - `arch/m68k/include/asm/uart.h` → moved to `arch/m68k/include/asm/coldfire/uart.h` (restored to upstream ColdFire content; `serial_mcf.c` updated to match)
-- `arch/m68k/lib/cache.c`, `interrupts.c` — extended for 68030 (non-ColdFire) builds
-- `arch/m68k/lib/Makefile` — split ARCH_COLDFIRE bundle; common files now `obj-y`, ColdFire-only (`bdinfo.o`) stays conditional
+- `arch/m68k/lib/interrupts.c` — `int_handler()` off-by-one fix (`vec >= 0x40`), debug output
+- `arch/m68k/lib/Makefile` — one added line: the 68030 builds `interrupts.o` and `traps.o`;
+  everything else there stays ColdFire-only, as upstream has it
+- `arch/m68k/include/asm/ptrace.h` — `struct pt_regs` picks the frame layout with
+  `#ifdef __mcoldfire__`, as Linux does, so every classic CPU gets SR, PC, format/vector
+
+Classic-CPU code goes in files of its own selected by the Makefile, not in
+`#ifdef`s inside shared ColdFire functions — the way Linux splits `arch/m68k`.
+Until 2026-10-25 the 68030 cache code was `#ifdef`'d into `lib/cache.c` and
+`lib/` was built for every m68k CPU; that broke upstream's `qemu-m68k` (68040)
+build and, through guards on non-existent `CONFIG_CF_V2/V3/V4` symbols,
+dropped the ACR and CACR writes from ColdFire V2/V3 `icache_enable()`. Check
+with `qemu-m68k_defconfig` and a ColdFire defconfig such as `M5208EVBE`
+after touching anything shared under `arch/m68k`.
 - `arch/m68k/Kconfig` — added `MC680x0`, `MC68030`, `TARGET_SPARKY1` alongside upstream's QEMU m68k additions
 - `lib/time.c`, `drivers/timer/timer-uclass.c` — minor fixes
 - `drivers/block/ide.c`, `drivers/block/Kconfig` — added `CONFIG_SYS_ATA_DATA_8BIT`
@@ -352,7 +366,7 @@ static void timer_interrupt_handler(void *arg)
 `counter` has exactly two references — incremented there, read by
 `get_count()`. It is the only IRQ handler installed (the other
 `irq_install_handler()` call lives in `arch/m68k/lib/time.c`, which is
-`obj-$(CONFIG_MCFTMR)` and not built for sparky1), and it is the only DUART
+ColdFire-only and not built for sparky1), and it is the only DUART
 interrupt source enabled: the serial driver writes `uimr = 0`, the timer then
 writes `uimr = 0b1000`. Nothing else uses the interrupt.
 
@@ -1202,8 +1216,8 @@ arch/m68k/cpu/mc68030/start.S:_start
   ├─ common/init/board_init.c:board_init_f_alloc_reserve()    reserve space for global_data at top of init ram 
   ├─ common/init/board_init.c:board_init_f_init_reserve()     zero the global_data struct
   ├─ arch/m68k/cpu/mc68030/cpu_init.c:cpu_init_f()
-  │    ├─ arch/m68k/lib/cache.c:icache_enable()               invalidate and enable instruction cache
-  │    └─ arch/m68k/lib/cache.c:dcache_enable()               invalidate and enable data cache
+  │    ├─ arch/m68k/cpu/mc68030/cache.c:icache_enable()         invalidate and enable instruction cache
+  │    └─ arch/m68k/cpu/mc68030/cache.c:dcache_enable()         invalidate and enable data cache
   └─ common/board_f.c:board_init_f(0)                         
 ```
 
