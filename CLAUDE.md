@@ -90,7 +90,9 @@ trusting it.
 ### New CPU support — `arch/m68k/cpu/mc68030/`
 - `start.S` — reset vector, early 68030 init, cache setup, jump to `board_init_f`
 - `cpu.c` — `cpu_init()`, `watchdog_reset()`
-- `cpu_init.c` — chip-select and memory-controller setup
+- `cpu_init.c` — `cpu_init_f()` enables both caches; `arch_preboot_os()`
+  masks interrupts and turns both caches off before `bootm` enters an OS —
+  see [Phase 3](#phase-3--handing-over-to-an-os-bootm)
 - `interrupts.c` — interrupt controller init
 - `speed.c` — clock/speed reporting
 
@@ -102,7 +104,8 @@ trusting it.
 
 ### XR68C681 DUART drivers
 - `drivers/serial/xr68c681_serial.c` — serial driver (UCLASS_SERIAL)
-- `drivers/timer/xr68c681_timer.c` — 100 Hz counter/timer driver (UCLASS_TIMER)
+- `drivers/timer/xr68c681_timer.c` — 100 Hz counter/timer driver (UCLASS_TIMER); its
+  remove method masks the timer interrupt before `bootm` enters an OS
 - `drivers/gpio/mc68681_gpio.c` — output port GPIO driver (UCLASS_GPIO)
 - `include/xr68c681.h` — register map (`xr68c681_t`) and all bit macros for the discrete chip
 - `include/dm/platform_data/mc68681.h` — shared DM platform data struct (`mc68681_plat`)
@@ -154,6 +157,11 @@ ACR (Auxiliary Control Register) at offset 0x04 is **write-only** — reads at t
 ### Timer mode
 
 The counter/timer runs at 100 Hz: N=0x0480 (1152), f = (3.6864 MHz / 16) / (2 × 1152) = 100 Hz. The interrupt is cleared by reading `uopc` (0x0F). In timer mode, the "stop counter" command does **not** actually halt the counter — it only clears ISR[3]. The `clock-frequency` DTS property must be set to `100`.
+
+Before `bootm` enters an OS, the driver's remove method (`DM_FLAG_OS_PREPARE`)
+writes `uimr = 0` and reads `uopc`, masking the interrupt at the DUART and
+clearing any pending tick. The counter keeps running, so `__udelay()` still
+works up to the jump. See [Phase 3](#phase-3--handing-over-to-an-os-bootm).
 
 ## CompactFlash / IDE — key implementation notes
 
@@ -961,8 +969,10 @@ anything; it did once on 2026-10-11.
 
 Decoded from **A25/A24** into four 16 MB quadrants, repeating every 64 MB
 (A26–A31 are not decoded). **SRAM is at 0 and the NVRAM above it** since
-2026-10-11 — busdecoder revision 03 in the hardware project, U-Boot branch
-`sparky1-sram-at-0` — because Linux wants RAM at 0.
+2026-10-11 — busdecoder revision 03 in the hardware project, U-Boot
+`f2f34cafe7b` on `sparky` — because Linux wants RAM at 0. That commit was made
+on a branch of its own, `sparky1-sram-at-0`, since deleted; older notes name
+it.
 
 | Region | Base | Chip select | U-Boot setting |
 |--------|------|-------------|----------------|
@@ -1312,6 +1322,46 @@ common/board_r.c:initcall_run_r()
 - `board_early_init_f`, `board_init` and `misc_init_r` are not configured and are skipped. `board_late_init` **is** configured, and exists solely to probe the CompactFlash.
 - **The CompactFlash must not be autoprobed.** `dm_autoprobe()` runs inside `initr_dm()`, long before `interrupt_init()` and the M68K `timer_init()` further down `init_sequence_r[]`. The XR68C681 tick counter is only advanced by the timer's 100 Hz interrupt handler, so a controller probed at `initr_dm()` time reaches `ide_probe()`'s `mdelay(100)` with the counter frozen at zero and `__udelay()` spins forever. Probing from `board_late_init()` is what avoids that; do not add `DM_FLAG_PROBE_AFTER_BIND` to the IDE driver.
 - The XR68C681 serial driver carries `DM_FLAG_PRE_RELOC` so it is bound and probed before relocation, then re-probed in RAM after relocation.
+
+### Phase 3 — handing over to an OS (`bootm`)
+
+`head.S` in the m68k kernel expects to be entered with interrupts masked and
+the caches off. Two hooks make `bootm` do that, both added 2026-10-25:
+
+```
+boot/bootm_os.c:boot_selected_os()
+  ├─ arch/m68k/cpu/mc68030/cpu_init.c:arch_preboot_os()
+  │    ├─ move.w #0x2700,%sr                  mask interrupts to level 7
+  │    └─ movec CI|CD → CACR                  invalidate and disable both caches,
+  │                                           in one write (EI, ED, FI, FD, IBE,
+  │                                           DBE and WA all cleared)
+  ├─ board_preboot_os()                       weak no-op
+  └─ arch/m68k/lib/bootm.c:do_bootm_linux()
+       └─ boot/bootm.c:bootm_final()          "Starting kernel ..."
+            └─ dm_remove_devices_active()     devices with DM_FLAG_OS_PREPARE
+                 └─ drivers/timer/xr68c681_timer.c:xr68c681_timer_remove()
+                      ├─ uimr = 0               mask the timer interrupt at the DUART
+                      └─ read uopc              clear any tick already pending
+       └─ jump to the entry point
+```
+
+**Notes:**
+- **Both are needed.** Masking the CPU alone only defers the tick: the DUART
+  keeps `/IRQ` asserted, and the kernel would take it through a vector it has not
+  set up as soon as it lowered its own mask.
+- The data cache is write-through, so turning it off loses nothing; the I-cache
+  matters, since `bootm` has just written the kernel into memory it may hold.
+- The console stays polled, so `bootm_final()`'s message still prints after the
+  mask.
+- **`go` runs neither hook**, so it enters with interrupts at level 0, the
+  caches on and the timer ticking. Something entered with `go` must clean up
+  itself.
+- `arch_preboot_os()` was checked on the board with a stand-in that prints SR
+  and CACR on entry: `SR=2000 CACR=00000101` with `go`, `SR=2700 CACR=00000000`
+  with `bootm`.
+- Still wrong for Linux: `do_bootm_linux()` passes arguments the ColdFire way, not
+  as the bootinfo chain classic m68k expects. See the hardware project's "Boot
+  Linux from the CompactFlash card".
 
 ### Exception vector table
 
