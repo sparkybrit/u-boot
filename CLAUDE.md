@@ -186,9 +186,42 @@ delays do not depend on interrupts. Small, self-contained, two lines.
 so each patch must be rebuilt against `upstream/main` alone and checked to build there.
 
 **Later, as a series:** the classic-m68k work — the 68030 CPU directory, its own `cache.c`, the
-bootinfo `bootm_680x0.c` — once the fork's `MC680x0` is merged into upstream's `M680x0` (see
-`arch/m68k/include/asm/io.h`: that changes `readw`/`readl` for the 68030, so check the image the
-same way as the cache split was checked).
+bootinfo `bootm_680x0.c` — once the fork's `MC680x0` is merged into upstream's `M680x0`; see
+[Merging `MC680x0` into `M680x0`](#merging-mc680x0-into-m680x0).
+
+### Merging `MC680x0` into `M680x0`
+
+**Not done yet; required before the classic-m68k series can go upstream.** The fork added
+`MC680x0` (selected by `MC68030`) before upstream added `M680x0` (selected by `M68040`, for
+`qemu-m68k`). Both mean "classic 68000 family", and upstream will not take two. In
+`arch/m68k/Kconfig` today:
+
+| | `M680x0` (upstream) | `MC680x0` (fork) |
+|---|---|---|
+| selected by | `M68040` | `MC68030` |
+| selects | nothing | `OF_CONTROL`, `DM`, `DM_SERIAL` |
+| tested in | `asm/io.h` — `readw`/`readl`/`writew`/`writel` become little-endian | `asm/immap.h` — `CFG_SYS_NUM_IRQS` 256 |
+| `SYS_CPU` | `default "m680x0"` | none — `board/sparky/sparky1/Kconfig` sets `"mc68030"` |
+
+The plan is to have `MC68030` select `M680x0` and delete `MC680x0`, moving its `select`s onto
+`MC68030` or `TARGET_SPARKY1` and its `immap.h` test onto `M680x0`. What that changes:
+
+- **`readw`/`readl` turn little-endian for the 68030.** Checked 2026-10-25: nothing sparky1
+  builds of its own calls them — the DUART drivers use `readb`/`writeb`, and the watchdog code in
+  `cpu/mc68030/cpu.c` uses explicit `out_be16()`. `inw`/`outw`, which the IDE data port uses, are
+  chosen by `__BIG_ENDIAN`, not by either symbol, so they do not move. Generic code built into the
+  image might still use them (`drivers/core/regmap.c` does), so compare the disassembly before and
+  after rather than trusting a grep, as the cache split was checked.
+- **`SYS_CPU` would become ambiguous.** Kconfig takes the first matching `default`, and
+  `arch/m68k/Kconfig` is read before the board's Kconfig, so with `M680x0` set `SYS_CPU` would
+  turn into `"m680x0"` and build upstream's `cpu/m680x0/` instead of `cpu/mc68030/`. Add
+  `default "mc68030" if MC68030` **above** the `M680x0` line and drop the board's override.
+  Check with `grep CONFIG_SYS_CPU .config` after `make sparky1_defconfig`.
+- **`CFG_SYS_NUM_IRQS` 256 reaches `qemu-m68k`** if the `immap.h` test simply moves to `M680x0`.
+  Harmless while it builds no `interrupts.c`, but `MC68030` is the narrower test if in doubt.
+
+Check both `sparky1_defconfig` and `qemu-m68k_defconfig` build, and boot sparky1 to a prompt
+with the CF probed.
 
 ## XR68C681 DUART — key implementation notes
 

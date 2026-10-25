@@ -71,10 +71,13 @@ config M680x0
 	  This enables support for the classic Motorola 68000 family of
 	  processors.
 
+# Duplicates M680x0 above; to be merged into it before going upstream.
+# Merging makes readw()/readl() little-endian and SYS_CPU "m680x0" for
+# the 68030 - see "Merging MC680x0 into M680x0" in CLAUDE.md.
 config MC680x0
 	select OF_CONTROL
 	select DM
-        select DM_SERIAL
+	select DM_SERIAL
 	bool
 
 # processor type
