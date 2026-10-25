@@ -261,6 +261,21 @@ config IDE_RESET
 	  where reset is 1 to assert reset and 0 to de-assert it. This function
 	  must be defined in a board-specific file.
 
+config IDE_SRST
+	bool "Reset devices through the device control register"
+	depends on !IDE_RESET
+	help
+	  If this is defined, IDE Reset will be performed by a software reset
+	  (SRST) through each bus's device control register instead of a
+	  board-specific hardware reset. Use it where the device's RESET- line
+	  is not under software control.
+
+	  The device control register is in the controller's control block,
+	  at CONFIG_SYS_ATA_ALT_OFFSET + 6 * CONFIG_SYS_ATA_STRIDE, so
+	  CONFIG_SYS_ATA_ALT_OFFSET must point at a real, decoded control
+	  block. With the default of 0 the write lands on the device/head
+	  register instead and resets nothing.
+
 endif  # IDE
 
 config LBA48

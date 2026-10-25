@@ -52,24 +52,6 @@ ulong ide_bus_offset[CONFIG_SYS_IDE_MAXBUS] = {
  */
 #define SETFEATURES_8BIT	0x01
 
-static void ide_reset(void)
-{
-	if (IS_ENABLED(CONFIG_IDE_RESET)) {
-		/* assert reset */
-		ide_set_reset(1);
-
-		/* the reset signal shall be asserted for et least 25 us */
-		udelay(25);
-
-		schedule();
-
-		/* de-assert RESET signal */
-		ide_set_reset(0);
-
-		mdelay(250);
-	}
-}
-
 static void ide_outb(int dev, int port, u8 val)
 {
 	log_debug("(dev= %d, port= %#x, val= 0x%02x) : @ 0x%08lx\n",
@@ -87,6 +69,40 @@ static u8 ide_inb(int dev, int port)
 	log_debug("(dev= %d, port= %#x) : @ 0x%08lx -> 0x%02x\n",
 		  dev, port, ATA_CURR_BASE(dev) + port, val);
 	return val;
+}
+
+static void ide_reset(void)
+{
+	if (IS_ENABLED(CONFIG_IDE_RESET)) {
+		/* assert reset */
+		ide_set_reset(1);
+
+		/* the reset signal shall be asserted for et least 25 us */
+		udelay(25);
+
+		schedule();
+
+		/* de-assert RESET signal */
+		ide_set_reset(0);
+
+		mdelay(250);
+	} else if (IS_ENABLED(CONFIG_IDE_SRST)) {
+		int bus;
+
+		/* SRST resets both devices on a bus, so once per bus will do */
+		for (bus = 0; bus < CONFIG_SYS_IDE_MAXBUS; bus++) {
+			int dev = bus * CONFIG_SYS_IDE_MAXDEVICE /
+				  CONFIG_SYS_IDE_MAXBUS;
+
+			/* SRST shall be asserted for at least 5 us */
+			ide_outb(dev, ATA_DEV_CTL, ATA_NIEN | ATA_SRST);
+			udelay(5);
+			ide_outb(dev, ATA_DEV_CTL, ATA_NIEN);
+		}
+
+		/* wait at least 2 ms before reading status */
+		mdelay(2);
+	}
 }
 
 #if IS_ENABLED(CONFIG_SYS_ATA_DATA_8BIT)
