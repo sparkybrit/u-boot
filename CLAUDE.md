@@ -397,8 +397,9 @@ and no corruption has been seen in 40 million sectors since; see below.
 ### A real time source for `udelay()`
 
 **Done — 9.6× on bulk CF reads, measured.** Also improves every timeout in
-U-Boot; nothing depended on the old behaviour. Lives on branch
-`sparky-udelay`, three commits, **not yet merged into `sparky`**.
+U-Boot; nothing depended on the old behaviour. In `sparky` since
+2026-08-29 (`906dae7a434`, "sparky1: spin on the DUART counter in
+`__udelay()`"); it was developed on branch `sparky-udelay`, since deleted.
 
 **Why it is safe to change.** The 100 Hz timer interrupt does exactly one thing:
 
