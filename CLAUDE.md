@@ -1622,6 +1622,52 @@ prints `Verified.` with the NVRAM untouched. A changed banner, or
   differing — because the card was contending for the bus. Power down, swap,
   power up.
 
+## Loading over the console — `loady`
+
+`CONFIG_CMD_LOADB` (since 2026-10-25, `b01420a59b5`) gives `loadb`, `loadx`
+and `loady`. **Give `loady` a baud rate: `loady <addr> 57600`.** At the
+console's own 115200 it fails every time.
+
+**Measured 2026-10-25** with a 64 KB random file, sent by `sb --ymodem` from
+lrzsz (installed), into `0x00200000` filled with `0xa5` beforehand, and read
+back with `md.l` for a byte-for-byte compare (this image has no `crc32`):
+
+| baud | result | time | rate |
+|---|---|---|---|
+| 115200 | block 0 NAKed 11 times, cancelled | — | — |
+| 57600 | match, 0 retries | 20.5 s | 3.2 KB/s (56% of line rate) |
+| 38400 | match, 0 retries | 28.7 s | 2.3 KB/s |
+| 19200 | match, 0 retries | 45.1 s | 1.5 KB/s |
+| 9600 | match, 0 retries | 77.9 s | 0.8 KB/s |
+
+At 3.2 KB/s a 2 MB compressed kernel takes about 11 minutes; `load ide 0:1`
+from the CF card is far faster when the card can be written elsewhere.
+
+**Why 115200 fails — likely, not proven.** A byte arrives every 87 µs and
+the DUART's receive FIFO holds 3. `common/xyzModem.c` calls `get_timer()`,
+`schedule()` and `tstc()` twice before each `getchar()`, all through the
+console and DM layers, which probably costs more than that on a 16 MHz 68030,
+so the FIFO overruns inside the very first block. It would be proven by
+reading the overrun bit in `usr` after a failed attempt. There is no flow
+control on the console: hardware RTS would cure it with no software at all
+— `MR1[7]` (`UART_UMR_RXRTS`) makes the XR68C681 drop RTS on OP0 itself
+when the FIFO fills — but that needs OP0 wired to the TTL-232R's CTS and not
+claimed by the GPIO driver, and nothing in the hardware project's notes says
+either way.
+
+**The baud handshake**, for a script: after `loady <addr> <baud>` U-Boot
+prints `Switch baudrate to <baud> bps and press ENTER ...`; switch the host
+and send CR; it then prints `Ready for binary (ymodem) download`. After the
+transfer it prints `Switch baudrate to 115200 bps and press ESC ...`; switch
+back and send ESC to get the prompt.
+
+**Two host-side traps.** `sb` run on a port opened by pyserial gives up at
+once (`Timeout on pathname`) because the file descriptor is non-blocking:
+clear `O_NONBLOCK` with `fcntl` before handing it over. And stop reading the
+console as soon as the `Ready` line arrives, or the reader eats the receiver's
+`C` start characters. A working script is
+`../sparky1/tests/tools/loady_test.py`.
+
 ## Testing
 
 ### Cache verification
