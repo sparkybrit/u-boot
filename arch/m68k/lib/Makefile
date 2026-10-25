@@ -7,7 +7,11 @@
 ## if the user asked for it
 lib-$(CONFIG_USE_PRIVATE_LIBGCC) += lshrdi3.o muldi3.o ashldi3.o ashrdi3.o
 
+ifdef CONFIG_MC68030
+obj-$(CONFIG_CMD_BOOTM) += bootm_680x0.o
+else
 obj-$(CONFIG_CMD_BOOTM) += bootm.o
+endif
 obj-$(CONFIG_ARCH_COLDFIRE) += cache.o interrupts.o time.o traps.o bdinfo.o fec.o
 obj-$(CONFIG_MC68030) += interrupts.o traps.o
 obj-$(CONFIG_MCF5441x) += clock.o
