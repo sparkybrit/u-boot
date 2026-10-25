@@ -204,9 +204,9 @@ before the change, so a check against data this image did not write);
 1-, 8- and 2 × 1024-sector write/read/`cmp` round trips with varied data and a
 poisoned destination all matched; trial 1's data re-read after trial 2 matched.
 **About 2.5 MB written — not yet soak tested.** The 40 M-sector soak below was
-all on the 8-bit port, and the 33R termination went on when only D0–D7 were
-wired — whether D8–D15 have it is not recorded here, and their signal
-integrity is unproven at volume.
+all on the 8-bit port. D8–D15 have the same 33R series termination as
+D0–D7 (confirmed 2026-10-25), but their signal integrity is unproven at
+volume.
 
 ### The 8-bit data port — still in the driver, no longer used
 
