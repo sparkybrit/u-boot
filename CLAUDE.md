@@ -1865,22 +1865,37 @@ Run `bdinfo` before poisoning to confirm that `gd`, `sp`, and the malloc arena a
 **Classic 68030** uses variable-length frames. All frames begin with the same 8-byte base (from low to high address at %sp):
 
 ```
-%sp+0  format/vector word  [15:12] = frame format code, [11:0] = vector offset (vector# × 4)
+%sp+0  old %sr
 %sp+2  old PC (high word)
 %sp+4  old PC (low word)
-%sp+6  old %sr
+%sp+6  format/vector word  [15:12] = frame format code, [11:0] = vector offset (vector# × 4)
 ```
+
+This is the order in `struct pt_regs` in `arch/m68k/include/asm/ptrace.h`
+(`sr`, `pc`, `format`, `vector`), and in Linux's `uapi/asm/ptrace.h` for
+non-ColdFire builds.
 
 | Format | Total size | Used for |
 |--------|-----------|---------|
-| `$0` | 8 bytes | Most exceptions (normal) |
-| `$2` | 12 bytes | Instruction continuation |
+| `$0` | 8 bytes | Most exceptions, including interrupts |
+| `$1` | 8 bytes | Throwaway frame, interrupt with the M bit set (U-Boot runs with M clear) |
+| `$2` | 12 bytes | CHK, TRAPcc, divide by zero, trace — adds the instruction address |
 | `$9` | 20 bytes | Coprocessor mid-instruction |
-| `$A` | 32 bytes | Short bus cycle |
-| `$B` | 92 bytes | Long bus cycle (bus/address error) |
+| `$A` | 32 bytes | Short bus cycle fault |
+| `$B` | 92 bytes | Long bus cycle fault (bus/address error) |
 
 The `RTE` instruction reads the format code to know how many words to pop. An exception handler that manually adjusts the stack or re-enters via `RTE` **must** preserve or correctly reconstruct this word.
 
-**ColdFire** always uses a fixed 8-byte frame; the format field is always `$4`. `RTE` always pops exactly 8 bytes.
+**ColdFire** puts the format/vector information *first*: one longword at
+`%sp+0` holding format [31:28], fault status [27:26] and [17:16], vector
+*number* [25:18] and the old SR [15:0], then the old PC at `%sp+4`. The frame
+is always 8 bytes, but the format field is `$4`–`$7`, recording how misaligned
+the SSP was (0–3 bytes) before the exception, and `RTE` undoes that alignment
+as it pops. Linux tells the two layouts apart with `#ifdef __mcoldfire__`,
+which the compiler defines for every ColdFire `-mcpu`.
+
+**Corrected 2026-10-25:** earlier versions of these notes listed the classic
+frame with the format/vector word at `%sp+0`, which is the ColdFire order. The
+code was right throughout; only the notes were wrong.
 
 **Implication for `interrupts.c`**: the 68030 `do_irq` / exception handler wrappers must not assume a fixed frame size. Decode the format word first before walking or modifying the frame.
