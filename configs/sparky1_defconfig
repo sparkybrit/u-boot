@@ -63,6 +63,9 @@ CONFIG_SYS_ATA_STRIDE=0x1
 CONFIG_SYS_ATA_DATA_OFFSET=0x0
 CONFIG_SYS_ATA_REG_OFFSET=0x0
 CONFIG_SYS_ATA_ALT_OFFSET=0x8
+# Reset the card by SRST through the control block at probe and ide reset.
+# Its RESET- is on the board's /RESET, which software cannot pulse alone.
+CONFIG_IDE_SRST=y
 # Some cards report a bogus LBA28 capacity in words 60/61 and the real one
 # in the LBA48 words 100-103; without this U-Boot only ever reads 60/61.
 CONFIG_LBA48=y

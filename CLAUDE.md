@@ -267,7 +267,24 @@ the device register read `a0`. `ide reset` then probed the card normally and
 LBA 0 still read `55aa`.
 
 `RESET–` is still not software-controlled — it is on the board's `/RESET` —
-so `CONFIG_IDE_RESET` stays off and there is no `ide_set_reset()`.
+so `CONFIG_IDE_RESET` stays off and there is no `ide_set_reset()`. Instead
+**`CONFIG_IDE_SRST`** (added on branch `ide-srst`, 2026-10-25) makes
+`ide_reset()` issue SRST through device control on each bus: nIEN + SRST,
+`udelay(5)`, nIEN alone, `mdelay(2)`, then `ide_init_one()`'s existing BSY
+wait. It runs on every probe — at boot and on each `ide reset`. The option
+`depends on !IDE_RESET`, and its help warns that `SYS_ATA_ALT_OFFSET` must
+point at a real control block: at the default 0 the write lands on the
+device/head register instead.
+
+**Checked on the board 2026-10-25** (card `SDCFXPS-064G`), first with a
+throwaway build printing alternate status around the reset: `d0` (BSY) while
+SRST is held; after 2 ms, with `a5`/`5a` planted in the task file beforehand,
+`01 01 00 00 a0` — the reset signature — and status `50`. At boot the card is
+still BSY (`80`) at 2 ms, just after the power-on hard reset, and the BSY wait
+covers it. Then on the clean build: 3/3 `reset`, 5/5 `ide reset`, a
+1024-sector read / rewrite-in-place / poisoned read-back / `cmp` matching, and
+LBA 0 still `55aa`. Do not judge SRST from the task file after `ide reset`:
+the probe's IDENTIFY overwrites it.
 
 ### Throughput
 
@@ -664,7 +681,8 @@ no-device check in `ide_init_one()`, `.of_match` on `U_BOOT_DRIVER(ide)`, the
 `ide_wait_drq()` helper and its use in `ide_write()` and `ide_read()` (not
 board-specific — the existing code aborts a transfer whenever the device has not
 asserted BSY yet, so this is an upstream bug too and is queued for the list),
-and
+the `CONFIG_IDE_SRST` branch in `ide_reset()` (which also moved below
+`ide_outb()`/`ide_inb()` to use them; a candidate for upstream too), and
 the `strlcpy()` size fix in `ide_probe()` (upstream passes `BLK_*_SIZE` where
 the buffers are `BLK_*_SIZE + 1`, which truncates a maximum-length string by
 one character - it printed `HDX 5.08` as `HDX 5.0`). That last one is an
@@ -1384,7 +1402,8 @@ prints `Verified.` with the NVRAM untouched. A changed banner, or
   `/dev/ttyUSB0` stays put across a board power cycle; `/dev/ttyACM0`
   disappearing and reappearing is what marks one. A script that waits for the
   console to re-enumerate after power-on will wait forever.
-- **`reset` pulses /RESET, `ide reset` does not.** The card's `-RESET` (CF
+- **`reset` pulses /RESET, `ide reset` does not** — `ide reset` only issues
+  SRST (`CONFIG_IDE_SRST`). The card's `-RESET` (CF
   pin 41) is on the board's `/RESET` net (the hardware project's CF connector
   table), so `reset` hard-resets the card too and is a far better proxy for a
   cold boot. The `RESET` instruction takes 518 clocks (MC68030 User's Manual,
