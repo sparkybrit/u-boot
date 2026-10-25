@@ -111,7 +111,8 @@ trusting it.
 ### CompactFlash / IDE
 - `arch/m68k/dts/sparky1.dts` — `ide@3000000` node, `compatible = "u-boot,ide"`
 - `board/sparky/sparky1/sparky1.c` — `board_late_init()` probes the controller
-- Uses upstream `drivers/block/ide.c` in 8-bit mode, plus `ide_wait_drq()` so a
+- Uses upstream `drivers/block/ide.c` with a 16-bit data port (since
+  `cfmanager` revision 04, 2026-10-25), plus `ide_wait_drq()` so a
   late DRQ does not abort a transfer; see
   [CompactFlash / IDE](#compactflash--ide--key-implementation-notes)
 
@@ -122,7 +123,7 @@ trusting it.
 - `arch/m68k/Kconfig` — added `MC680x0`, `MC68030`, `TARGET_SPARKY1` alongside upstream's QEMU m68k additions
 - `lib/time.c`, `drivers/timer/timer-uclass.c` — minor fixes
 - `drivers/block/ide.c`, `drivers/block/Kconfig` — added `CONFIG_SYS_ATA_DATA_8BIT`
-  (8-bit data port), a `u-boot,ide` devicetree binding, and a floating-bus
+  (8-bit data port, no longer used by sparky1), a `u-boot,ide` devicetree binding, and a floating-bus
   no-device check. **This file conflicts on rebase** — see below.
 
 ## XR68C681 DUART — key implementation notes
@@ -165,18 +166,51 @@ to cope with the wiring.
 | Property | Value | Kconfig |
 |----------|-------|---------|
 | Base address | `0x03000000` | `CONFIG_SYS_ATA_BASE_ADDR` |
-| Registers | 8, byte-wide, selected by A2–A0 | `CONFIG_SYS_ATA_STRIDE=0x1` |
-| Data port | offset 0, **8 bits** on D31–D24 | `CONFIG_SYS_ATA_DATA_8BIT=y` |
+| Registers | 8, byte-wide on D31–D24, selected by A2–A0 | `CONFIG_SYS_ATA_STRIDE=0x1` |
+| Data port | offset 0, **16 bits** on D31–D16, word accesses only | `CONFIG_SYS_ATA_DATA_8BIT` **not** set |
 | Devices | one, master only | `CONFIG_SYS_IDE_MAXDEVICE=0x1` |
 
 Timing (`/IORD`, `/IOWR`, wait states, `/DSACK0`) comes from the `cfmanager`
 GAL in the sparky1 hardware project, which stretches every CF cycle to ~437 ns
-for ATA PIO mode 0. The 400 ns ATA requires between the last data byte and the
+for ATA PIO mode 0. The 400 ns ATA requires between the last data word and the
 next status read is therefore free — no extra delay in the driver.
 
-### 8-bit data port
+### 16-bit data port — since `cfmanager` revision 04
 
-Only the low byte of the ATA data bus is wired, so `CONFIG_SYS_ATA_DATA_8BIT`
+**Changed 2026-10-25**, branch `cf-16bit`, commit `b4eb3ff0c9b`. Revision 04
+wires CF D0–D7 to D31–D24 (as before) and **CF D8–D15 to D23–D16**. The data
+port at offset 0 takes **word accesses only** — a byte access there loses every
+other byte — while the seven command registers are still byte-wide on D31–D24.
+
+The only change was dropping `CONFIG_SYS_ATA_DATA_8BIT=y` from the defconfig.
+That also removes `ide_set_8bit_mode()`, so no `SET FEATURES 0x01` is sent.
+**No driver change was needed**, and the reason is worth knowing:
+
+- The CPU sees each ATA word **byte-swapped** — the ATA low byte arrives on
+  D31–D24, the high half of a big-endian word.
+- On big-endian m68k, `inw()`/`outw()` are `in_le16()`/`out_le16()`, which
+  swap it back. So upstream's `le16_to_cpu(inw())` for sector data cancels
+  out to a raw word move, keeping the bytes in stream order, and
+  `be16_to_cpu(inw())` for IDENTIFY leaves one swap and gives true ATA words.
+  The disassembly shows exactly that: plain `movew` in `ide_read()`/`ide_write()`,
+  `movew` + `rorw #8` in the IDENTIFY loop.
+- Sector buffers must now be **2-byte aligned**.
+
+**Tested on the board 2026-10-25** (card `SDCFXPS-064G`): IDENTIFY correct
+(model, `HDX16.01`, serial, 125059072 sectors via LBA48 — every other string
+character crosses D8–D15, so that alone proves the upper lane and the order);
+probe clean on 3/3 `reset`s; LBA 0 still reads `55 aa` at `0x1FE` (written
+before the change, so a check against data this image did not write);
+1-, 8- and 2 × 1024-sector write/read/`cmp` round trips with varied data and a
+poisoned destination all matched; trial 1's data re-read after trial 2 matched.
+**About 2.5 MB written — not yet soak tested.** The 40 M-sector soak below was
+all on the 8-bit port, and the 33R termination went on when only D0–D7 were
+wired — whether D8–D15 have it is not recorded here, and their signal
+integrity is unproven at volume.
+
+### The 8-bit data port — still in the driver, no longer used
+
+Before revision 04, only the low byte of the ATA data bus was wired, so `CONFIG_SYS_ATA_DATA_8BIT`
 switches `ide_input_data()`, `ide_output_data()` and `ide_input_swap_data()` to
 byte transfers, and makes `ide_ident()` call `ide_set_8bit_mode()` before
 IDENTIFY — which issues `INITIALIZE DEVICE PARAMETERS` (0x91, tolerated if it
@@ -188,7 +222,7 @@ That last one matters: without it the card also drives D8–D15.
 because 8-bit mode is a **per-device** setting, and `ide_init_one()` runs once
 per bus.
 
-### Byte ordering — the part that is easy to get wrong
+### Byte ordering in 8-bit mode — the part that is easy to get wrong
 
 The two data paths need *different* handling, and the reason is not symmetric:
 
@@ -215,11 +249,18 @@ This matches the reference implementation in the hardware project's
 Only A2–A0 reach the card, so the alternate status and device control
 registers are unreachable. `ATA_DEV_CTL` has exactly one user in the driver,
 `atapi_wait_mask()`, which is compiled out unless `CONFIG_ATAPI` is set —
-hence `CONFIG_SYS_ATA_DATA_8BIT` carries `depends on !ATAPI`. `RESET–` is not
+hence `CONFIG_SYS_ATA_DATA_8BIT` carries `depends on !ATAPI`. **With the
+16-bit port that guard is gone** — nothing stops `CONFIG_ATAPI` being enabled
+now, so do not. `RESET–` is not
 software-controlled either, so `CONFIG_IDE_RESET` stays off and there is no
 `ide_set_reset()`.
 
 ### Throughput
+
+**16-bit port, 2026-10-25, `SDCFXPS-064G`:** `ide read` 1024 sectors in
+0.54–0.55 s (~940 KB/s), `ide write` 1024 sectors in 0.53 s (~970 KB/s),
+against 0.78 s and 1.1–2.1 s for the same card on the 8-bit port. The rest of
+this section is the 8-bit history.
 
 Was limited by the 100 Hz system timer, not the bus, until `__udelay()` got a
 finer time source (see below). Measured on a SanDisk SDCFX-008G:
@@ -245,9 +286,8 @@ One tick per sector capped reads at ~100 sectors/s ≈ 51 KB/s, and the measured
 
 At 1.045 ms per sector the read is now bounded by the transfer itself — 512
 single-byte port reads — rather than by any delay, so the next gain would have
-to come from the bus. Sixteen-bit mode is wired up in `cfmanager` but commented
-out; enabling it needs the PLD change, CF D8–D15 wired to D23–D16, **and**
-clearing `CONFIG_SYS_ATA_DATA_8BIT`.
+to come from the bus — which is what `cfmanager` revision 04's 16-bit port
+then did (figures above).
 
 Writing gained about as much: 512 KB in **2.87–3.01 s** (~170 KB/s), against an
 old filesystem-level figure of ~18 KB/s (2 MB of metadata in 112 s). Long writes
@@ -1100,7 +1140,7 @@ assumes 8 MB; at 4 MB it would be the end of RAM. The test recipes below use
 | `drivers/serial/xr68c681_serial.c` | XR68C681 serial driver |
 | `drivers/timer/xr68c681_timer.c` | XR68C681 timer driver |
 | `drivers/gpio/mc68681_gpio.c` | XR68C681 GPIO (output port) driver |
-| `drivers/block/ide.c` | Generic IDE driver — extended for 8-bit data ports |
+| `drivers/block/ide.c` | Generic IDE driver — extended for 8-bit data ports (sparky1 now uses 16-bit) |
 | `include/ata.h` | ATA register offsets, computed from `CONFIG_SYS_ATA_*` |
 | `drivers/serial/serial_mcf.c` | ColdFire serial driver (uses `<asm/coldfire/uart.h>`) |
 | `doc/board/sparky/index.rst` | Sphinx toctree entry for sparky board docs |
@@ -1229,9 +1269,8 @@ common/board_r.c:initcall_run_r()
   │    └─ uclass_first_device_err(UCLASS_IDE) → drivers/block/ide.c:ide_probe()
   │         ├─ ide_init_one(0)                 select master, 0xFF check, poll BSY
   │         ├─ ide_ident(0)
-  │         │    ├─ ide_set_8bit_mode()        INIT_DEV_PARAMS, then SET FEATURES 0x01
   │         │    ├─ ATA_CMD_ID_ATA             IDENTIFY DEVICE
-  │         │    └─ ide_input_swap_data()      512 bytes, one at a time
+  │         │    └─ ide_input_swap_data()      256 words, each byte-swapped by inw()
   │         └─ blk_create_devicef("ide_blk")   → "ide 0" block device
   └─ common/board_r.c:run_main_loop() → common/main.c:main_loop()
 ```
@@ -1333,8 +1372,7 @@ prints `Verified.` with the NVRAM untouched. A changed banner, or
   console to re-enumerate after power-on will wait forever.
 - **`reset` pulses /RESET, `ide reset` does not.** If the card's reset is on
   that net — believed so, but see the stuck-busy card below — that makes
-  `reset` a far better proxy for a cold boot, and the only way to chase the
-  intermittent 8-bit-mode rejection below without power cycling.
+  `reset` a far better proxy for a cold boot.
 - The `/RESET` pulse `nvram_write` issues after a successful write still works
   and is the only option if the board is wedged past the console.
 - **A CF card a test left busy may need a power cycle.** On 2026-10-11, after
@@ -1417,11 +1455,13 @@ Bus 0: OK
 ```
 
 `Bus 0: not available` means the status register read back `0xFF` — an empty
-socket, or `/DISKCS` not reaching the card. `8-bit transfer mode rejected`
-means the card refused `SET FEATURES 0x01`; that card cannot be used on this
-board without going to 16-bit mode in `cfmanager`.
+socket, or `/DISKCS` not reaching the card.
 
-#### Open bug — 8-bit mode intermittently refused at cold boot
+#### Moot since the 16-bit port — 8-bit mode intermittently refused at cold boot
+
+The 16-bit port never sends `SET FEATURES 0x01`, so this cannot happen now.
+The diagnosis is kept because the card state it points at — probed while still
+running its power-on self-test — could still affect IDENTIFY.
 
 Seen 2026-08-30 on a SanDisk `SDCFXPS-032G`:
 
