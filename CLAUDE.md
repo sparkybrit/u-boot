@@ -97,6 +97,9 @@ trusting it.
 - `cache.c` — `icache_*()`/`dcache_*()` through the 68030 CACR; the ColdFire
   `arch/m68k/lib/cache.c` is not built for the 68030
 - `speed.c` — clock/speed reporting
+- `arch/m68k/lib/bootm_680x0.c` — `do_bootm_linux()` for the 68030: hands the
+  kernel a bootinfo chain at `_end` instead of ColdFire's `bd_info` arguments;
+  see [Phase 3](#phase-3--handing-over-to-an-os-bootm)
 
 ### Sparky1 board — `board/sparky/sparky1/`
 - `Kconfig`, `Makefile`, `sparky1.c` — board init, `checkboard()`, `dram_init()`
@@ -124,8 +127,13 @@ trusting it.
 ### Modified upstream files
 - `arch/m68k/include/asm/uart.h` → moved to `arch/m68k/include/asm/coldfire/uart.h` (restored to upstream ColdFire content; `serial_mcf.c` updated to match)
 - `arch/m68k/lib/interrupts.c` — `int_handler()` off-by-one fix (`vec >= 0x40`), debug output
-- `arch/m68k/lib/Makefile` — one added line: the 68030 builds `interrupts.o` and `traps.o`;
-  everything else there stays ColdFire-only, as upstream has it
+- `arch/m68k/lib/Makefile` — the 68030 builds `interrupts.o` and `traps.o`, and
+  `bootm_680x0.o` instead of `bootm.o`; everything else there stays ColdFire-only,
+  as upstream has it
+- `arch/m68k/include/asm/bootinfo.h` — machine, CPU, FPU and MMU constants,
+  `struct mem_info` and `BOOTINFOV_MAGIC`, as in the kernel's uapi header
+- `boot/bootm.c` — re-enables interrupts when a subcommand fails (upstream bug;
+  a candidate for the list)
 - `arch/m68k/include/asm/ptrace.h` — `struct pt_regs` picks the frame layout with
   `#ifdef __mcoldfire__`, as Linux does, so every classic CPU gets SR, PC, format/vector
 
@@ -1165,9 +1173,11 @@ Physical and virtual addresses now agree, which is what the swap was for.
    `0x00400000`. A bigger load runs into the stack and heap. Ample for a
    compressed kernel; an uncompressed uImage is the case to watch.
 2. **The unpacked kernel must fit below the file** — 4 MB less 4 KB, from
-   `0x00001000` to `0x00400000`. Only the image counts: the kernel's BSS and
-   the bootinfo after it may run past `0x00400000`, because by the time either
-   is written `bootm` has finished with the file.
+   `0x00001000` to `0x00400000`. The BSS is part of that: a binary made with
+   `objcopy -O binary` holds it as zeros (see
+   [Phase 3](#phase-3--handing-over-to-an-os-bootm)). Only the page of
+   alignment to `_end` and the bootinfo after it may run past `0x00400000`,
+   because by the time they are written `bootm` has finished with the file.
 
 Breaking the second fails loudly, not silently. `bootm` overwrites its own
 compressed source while unpacking, but `bootm_load_os()` checks for the overlap
@@ -1340,9 +1350,16 @@ common/board_r.c:initcall_run_r()
 ### Phase 3 — handing over to an OS (`bootm`)
 
 `head.S` in the m68k kernel expects to be entered with interrupts masked and
-the caches off. Two hooks make `bootm` do that, both added 2026-10-25:
+the caches off, and finds its arguments in a bootinfo chain at `_end`. All
+three were added 2026-10-25:
 
 ```
+boot/bootm.c:bootm_run_states(), OS_PREP
+  └─ arch/m68k/lib/bootm_680x0.c:do_bootm_linux(BOOTM_STATE_OS_PREP)
+       └─ bootinfo_setup()                    "Bootinfo at 00002000, 92 bytes"
+            ├─ BOOTINFOV_MAGIC at load + 2?   no: refuse, back to the prompt
+            ├─ board_bootinfo_types()         sparky1.c: MACH 15, 68030, no FPU
+            └─ write the chain at ALIGN(load + image_len, 4 KB)
 boot/bootm_os.c:boot_selected_os()
   ├─ arch/m68k/cpu/mc68030/cpu_init.c:arch_preboot_os()
   │    ├─ move.w #0x2700,%sr                  mask interrupts to level 7
@@ -1350,13 +1367,13 @@ boot/bootm_os.c:boot_selected_os()
   │                                           in one write (EI, ED, FI, FD, IBE,
   │                                           DBE and WA all cleared)
   ├─ board_preboot_os()                       weak no-op
-  └─ arch/m68k/lib/bootm.c:do_bootm_linux()
+  └─ arch/m68k/lib/bootm_680x0.c:do_bootm_linux(BOOTM_STATE_OS_GO)
        └─ boot/bootm.c:bootm_final()          "Starting kernel ..."
             └─ dm_remove_devices_active()     devices with DM_FLAG_OS_PREPARE
                  └─ drivers/timer/xr68c681_timer.c:xr68c681_timer_remove()
                       ├─ uimr = 0               mask the timer interrupt at the DUART
                       └─ read uopc              clear any tick already pending
-       └─ jump to the entry point
+       └─ jump to the entry point, no arguments
 ```
 
 **Notes:**
@@ -1373,9 +1390,53 @@ boot/bootm_os.c:boot_selected_os()
 - `arch_preboot_os()` was checked on the board with a stand-in that prints SR
   and CACR on entry: `SR=2000 CACR=00000101` with `go`, `SR=2700 CACR=00000000`
   with `bootm`.
-- Still wrong for Linux: `do_bootm_linux()` passes arguments the ColdFire way, not
-  as the bootinfo chain classic m68k expects. See the hardware project's "Boot
-  Linux from the CompactFlash card".
+
+**The bootinfo chain** (`arch/m68k/lib/bootm_680x0.c`, built instead of the
+ColdFire `bootm.c` for the 68030):
+
+| Record | Value on sparky1 |
+|--------|------------------|
+| `BI_MACHTYPE` | 15 — not assigned upstream; the kernel port must define `MACH_SPARKY1` as 15 (`board/sparky/sparky1/sparky1.c`) |
+| `BI_CPUTYPE` / `BI_MMUTYPE` | `CPU_68030` / `MMU_68030` |
+| `BI_FPUTYPE` | 0 — no FPU; the kernel never probes, so this alone decides it |
+| `BI_MEMCHUNK` | one per `gd->dram[]` bank: `0x00000000`, 8 MB |
+| `BI_RAMDISK` | only if `bootm` was given one |
+| `BI_COMMAND_LINE` | `bootargs`, after `bootm`'s substitutions; the kernel keeps 255 characters |
+| `BI_LAST` | |
+
+- **Where `_end` is.** `head.S` reads the chain from `_end`, and the uImage does
+  not record it. `vmlinux-std.lds` puts the BSS *before* the init sections, so
+  `objcopy -O binary` writes the BSS out as zeros and the file runs to the end
+  of the init data. Only the `ALIGN(PAGE_SIZE)` closing `.init_end` is missing
+  from the file — it grows the segment's memory size, not its file size — so
+  `_end` is the end of the unpacked image rounded up to 4 KB. Checked against a
+  `virt_defconfig` vmlinux: file ends `0x783318`, `_end` `0x784000`. **An
+  earlier reading here, that the binary "runs exactly to `_end`", was wrong**,
+  by `0xce8` bytes; the kernel's own comment about `_end` "at the end of the
+  load segment" means the memory image. A binary padded to `_end` still works.
+- **Built in `OS_PREP`, not `OS_GO`**, so a refusal returns to the prompt: by
+  `OS_GO`, `arch_preboot_os()` has already masked interrupts and turned the
+  caches off.
+- **`bootm` used to leave interrupts off after a failed subcommand** — an
+  upstream bug, fixed here in `boot/bootm.c` (a candidate for the list). It
+  disables them before `LOADOS` and its `subcommand failed` path returned
+  before the `err:` label that turns them back on. With the tick frozen, the
+  next delay never ends: `time sleep 1` hung after a refused `bootm`.
+- `head.S` puts free memory at the first page after `BI_LAST`, so its page
+  tables never overwrite the chain.
+- **Checked on the board 2026-10-25** with a stand-in kernel linked at
+  `0x1000`, laid out like `vmlinux-std.lds` (bootinfo magic after a `bra.s`,
+  BSS before data, file ending at `0x136c`, `_end` at `0x2000`), gzipped into a
+  uImage and poked into RAM with `mw.l`: it reported `SR=2708` (mask 7;
+  `08` is condition codes), CACR 0, a zero BSS, its data intact, and exactly
+  the records above at `0x2000`. An image without the magic was refused with
+  `No bootinfo version table at 0x00001002`, and `time sleep 1` then gave
+  1.000 s. A real kernel has not been booted yet: there is no sparky1 machine
+  in the kernel to boot.
+- Building a kernel image: `objcopy -O binary vmlinux Image`, gzip it, then
+  `mkimage -A m68k -O linux -T kernel -C gzip -a 0x00001000 -e 0x00001000`.
+  The entry is `_stext` (`0x1000`), not the ELF entry `_start` (`0x2000`),
+  though either works: `_start` is a `jra __start` a page in.
 
 ### Exception vector table
 
