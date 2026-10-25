@@ -132,8 +132,8 @@ trusting it.
   as upstream has it
 - `arch/m68k/include/asm/bootinfo.h` — machine, CPU, FPU and MMU constants,
   `struct mem_info` and `BOOTINFOV_MAGIC`, as in the kernel's uapi header
-- `boot/bootm.c` — re-enables interrupts when a subcommand fails (upstream bug;
-  a candidate for the list)
+- `boot/bootm.c` — re-enables interrupts when a subcommand fails (upstream bug; see
+  [Upstream candidates](#upstream-candidates))
 - `arch/m68k/include/asm/ptrace.h` — `struct pt_regs` picks the frame layout with
   `#ifdef __mcoldfire__`, as Linux does, so every classic CPU gets SR, PC, format/vector
 
@@ -150,6 +150,43 @@ after touching anything shared under `arch/m68k`.
 - `drivers/block/ide.c`, `drivers/block/Kconfig` — added `CONFIG_SYS_ATA_DATA_8BIT`
   (8-bit data port, no longer used by sparky1), a `u-boot,ide` devicetree binding, and a floating-bus
   no-device check. **This file conflicts on rebase** — see below.
+
+## Upstream candidates
+
+Fixes made in this fork that are upstream bugs rather than sparky1 changes. Each wants its own patch,
+based on `upstream/main` in a worktree and sent with b4, exactly as the `strlcpy()` fix was — see
+[Upstream submission](#upstream-submission--the-strlcpy-fix) for the whole procedure. Once one lands,
+keep the local copy until `sparky` is rebased onto a release that contains it.
+
+| Fix | Fork commit | File | Upstream impact |
+|-----|-------------|------|-----------------|
+| **bootm: re-enable interrupts when a subcommand fails** — **good candidate for the mailing list** | `a9a3ae8a151` | `boot/bootm.c` | Any board whose delays need interrupts: after a refused `bootm`, the next delay hangs |
+| `ide_wait_drq()`: wait for DRQ, not just !BSY, before a PIO data phase | `f34141ab7a5` | `drivers/block/ide.c` | Long writes abort with `Error (no IRQ)` on a device slow to assert BSY |
+| `CONFIG_IDE_SRST`: software reset through device control | `4a05ffa5622` | `drivers/block/ide.c`, `Kconfig` | A feature, not a fix: boards with no `ide_set_reset()` get no reset at all today |
+| `int_handler()`: `vec >= 0x40`, not `> 0x40` | inside `6800f0dfe71` | `arch/m68k/lib/interrupts.c` | ColdFire: vector 64 is not folded to slot 0, so it misses its handler, and with `CFG_SYS_NUM_IRQS` 64 it reads past `irq_vecs[]` |
+| `struct pt_regs` layout by `__mcoldfire__` | `1d708e45f8d` | `arch/m68k/include/asm/ptrace.h` | Latent: upstream tests `__M68K__`, always defined, so a classic CPU would get the ColdFire frame order; harmless only while upstream builds `traps.c` for ColdFire alone |
+
+**The bootm fix in detail.** `bootm_run_states()` calls `bootm_disable_interrupts()` before
+`LOADOS` and re-enables them at its `err:` label, but the `subcommand failed` path after
+`OS_CMDLINE`, `OS_BD_T`, `OS_PREP` and `OS_FAKE_GO` returns before reaching it. The early return has
+been there since `13819f07ea6` ("bootm: Change incorrect 'unsupported' error"). The fix adds
+`if (iflag) enable_interrupts();` before that return, and deliberately does not `goto err`, which
+would also start calling `reset_cpu()` for a subcommand returning `BOOTM_ERR_RESET`. Found on
+sparky1, where the 100 Hz tick only advances in the timer interrupt: after `bootm` refused an image
+in `OS_PREP`, `time sleep 1` hung, and with the fix it gives 1.000 s (2026-10-25,
+`../sparky1/tests/bootinfo_test`). Interrupts are off at that point on every architecture whose
+`disable_interrupts()` does anything, so the bug is not m68k-specific; it only goes unnoticed where
+delays do not depend on interrupts. Small, self-contained, two lines.
+
+**Preparing the others.** The `int_handler()` fix is buried in a sparky1 driver commit with
+`debug()` lines around it, so it needs a commit of its own before it can go. `ide_wait_drq()` and
+`CONFIG_IDE_SRST` both touch `drivers/block/ide.c`, which the fork also changes for the 8-bit port,
+so each patch must be rebuilt against `upstream/main` alone and checked to build there.
+
+**Later, as a series:** the classic-m68k work — the 68030 CPU directory, its own `cache.c`, the
+bootinfo `bootm_680x0.c` — once the fork's `MC680x0` is merged into upstream's `M680x0` (see
+`arch/m68k/include/asm/io.h`: that changes `readw`/`readl` for the 68030, so check the image the
+same way as the cache split was checked).
 
 ## XR68C681 DUART — key implementation notes
 
@@ -1418,7 +1455,7 @@ ColdFire `bootm.c` for the 68030):
   `OS_GO`, `arch_preboot_os()` has already masked interrupts and turned the
   caches off.
 - **`bootm` used to leave interrupts off after a failed subcommand** — an
-  upstream bug, fixed here in `boot/bootm.c` (a candidate for the list). It
+  upstream bug, fixed here in `boot/bootm.c` (see [Upstream candidates](#upstream-candidates)). It
   disables them before `LOADOS` and its `subcommand failed` path returned
   before the `err:` label that turns them back on. With the tick frozen, the
   next delay never ends: `time sleep 1` hung after a refused `bootm`.
