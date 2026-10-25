@@ -69,6 +69,24 @@ static int xr68c681_timer_probe(struct udevice *dev)
 	return (0);
 }
 
+/*
+ * Called by bootm just before it jumps to an OS.  Mask the counter/timer
+ * interrupt at the DUART, so the OS does not take a tick through a vector
+ * it has not set up yet as soon as it lowers the CPU's interrupt mask.
+ * The counter keeps running, so __udelay() still works until the jump.
+ */
+static int xr68c681_timer_remove(struct udevice *dev)
+{
+	struct mc68681_plat *plat = dev_get_plat(dev);
+	xr68c681_t *base = (xr68c681_t *)(plat->base);
+
+	writeb(0, &base->uimr);
+	/* clear any interrupt already pending */
+	readb(&base->uopc);
+
+	return 0;
+}
+
 static int xr68c681_timer_of_to_plat(struct udevice *dev)
 {
 	struct mc68681_plat *plat = dev_get_plat(dev);
@@ -102,5 +120,7 @@ U_BOOT_DRIVER(xr68c681_timer) = {
 	.of_to_plat = xr68c681_timer_of_to_plat,
 	.plat_auto = sizeof(struct mc68681_plat),
 	.probe = xr68c681_timer_probe,
+	.remove = xr68c681_timer_remove,
 	.ops = &xr68c681_timer_ops,
+	.flags = DM_FLAG_OS_PREPARE,
 };
