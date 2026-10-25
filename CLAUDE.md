@@ -153,18 +153,20 @@ after touching anything shared under `arch/m68k`.
 
 ## Upstream candidates
 
-Fixes made in this fork that are upstream bugs rather than sparky1 changes. Each wants its own patch,
+Fixes made in this fork that are upstream bugs rather than sparky1 changes, and whether each has gone
+to the list yet. Each wants its own patch,
 based on `upstream/main` in a worktree and sent with b4, exactly as the `strlcpy()` fix was — see
 [Upstream submission](#upstream-submission--the-strlcpy-fix) for the whole procedure. Once one lands,
 keep the local copy until `sparky` is rebased onto a release that contains it.
 
-| Fix | Fork commit | File | Upstream impact |
-|-----|-------------|------|-----------------|
-| **bootm: re-enable interrupts when a subcommand fails** — **good candidate for the mailing list** | `a9a3ae8a151` | `boot/bootm.c` | Any board whose delays need interrupts: after a refused `bootm`, the next delay hangs |
-| `ide_wait_drq()`: wait for DRQ, not just !BSY, before a PIO data phase | `f34141ab7a5` | `drivers/block/ide.c` | Long writes abort with `Error (no IRQ)` on a device slow to assert BSY |
-| `CONFIG_IDE_SRST`: software reset through device control | `4a05ffa5622` | `drivers/block/ide.c`, `Kconfig` | A feature, not a fix: boards with no `ide_set_reset()` get no reset at all today |
-| `int_handler()`: `vec >= 0x40`, not `> 0x40` | inside `6800f0dfe71` | `arch/m68k/lib/interrupts.c` | ColdFire: vector 64 is not folded to slot 0, so it misses its handler, and with `CFG_SYS_NUM_IRQS` 64 it reads past `irq_vecs[]` |
-| `struct pt_regs` layout by `__mcoldfire__` | `1d708e45f8d` | `arch/m68k/include/asm/ptrace.h` | Latent: upstream tests `__M68K__`, always defined, so a classic CPU would get the ColdFire frame order; harmless only while upstream builds `traps.c` for ColdFire alone |
+| Fix | Fork commit | File | Upstream impact | Sent |
+|-----|-------------|------|-----------------|------|
+| **bootm: re-enable interrupts when a subcommand fails** — **good candidate for the mailing list** | `a9a3ae8a151` | `boot/bootm.c` | Any board whose delays need interrupts: after a refused `bootm`, the next delay hangs | no |
+| `ide_wait_drq()`: wait for DRQ, not just !BSY, before a PIO data phase | `f34141ab7a5` | `drivers/block/ide.c` | Long writes abort with `Error (no IRQ)` on a device slow to assert BSY | no |
+| `CONFIG_IDE_SRST`: software reset through device control | `4a05ffa5622` | `drivers/block/ide.c`, `Kconfig` | A feature, not a fix: boards with no `ide_set_reset()` get no reset at all today | no |
+| `int_handler()`: `vec >= 0x40`, not `> 0x40` | inside `6800f0dfe71` | `arch/m68k/lib/interrupts.c` | ColdFire: vector 64 is not folded to slot 0, so it misses its handler, and with `CFG_SYS_NUM_IRQS` 64 it reads past `irq_vecs[]` | no |
+| `struct pt_regs` layout by `__mcoldfire__` | `1d708e45f8d` | `arch/m68k/include/asm/ptrace.h` | Latent: upstream tests `__M68K__`, always defined, so a classic CPU would get the ColdFire frame order; harmless only while upstream builds `traps.c` for ColdFire alone | no |
+| `ide_probe()`: `strlcpy()` size truncated device strings by one character | `1a62283d75f` | `drivers/block/ide.c` | `ide info` printed `HDX 5.08` as `HDX 5.0` | **yes** — 2026-08-29, accepted into `next` as `0b4c421190a` on 2026-09-15; first release v2027.01. See [Upstream submission](#upstream-submission--the-strlcpy-fix) |
 
 **The bootm fix in detail.** `bootm_run_states()` calls `bootm_disable_interrupts()` before
 `LOADOS` and re-enables them at its `err:` label, but the `subcommand failed` path after
