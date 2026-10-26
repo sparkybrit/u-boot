@@ -29,8 +29,6 @@ CONFIG_CMD_LOADB=y
 CONFIG_HUSH_PARSER=y
 CONFIG_CMD_CACHE=y
 CONFIG_CMD_TIME=y
-CONFIG_CMD_GPIO=y
-CONFIG_CMD_GPIO_READ=y
 CONFIG_CMD_DM=y
 CONFIG_SYS_RELOC_GD_ENV_ADDR=y
 # CONFIG_NET is not set
@@ -47,9 +45,6 @@ CONFIG_TRACE_EARLY=y
 # TIMER
 CONFIG_TIMER=y
 CONFIG_MC68681_TIMER=y
-# GPIO
-CONFIG_DM_GPIO=y
-CONFIG_MC68681_GPIO=y
 # IDE / CompactFlash
 # CF in True IDE mode at 0x03000000: 8 byte-wide registers selected by A2-A0
 # with a 16-bit data port at offset 0: cfmanager revision 04 wires CF D0-D7

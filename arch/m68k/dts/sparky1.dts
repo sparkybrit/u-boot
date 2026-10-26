@@ -35,16 +35,6 @@
 		bootph-all;
     };
 
-    gpio0: gpio0@2000000 {
-        compatible = "motorola,mc68681_gpio";
-        reg = <0x02000000 0x10>;
-    	gpio-controller;
-		#gpio-cells = <2>;
-		gpio-bank-name="o";
-		ngpios = <8>;
-		status = "okay";
-	};
-
     /*
      * CompactFlash in True IDE mode: 8 byte-wide registers selected by
      * A2-A0, on an 8-bit port at D31-D24. /DISKCS and the ATA strobes come
@@ -59,14 +49,4 @@
         reg = <0x03000000 0x8>;
         status = "okay";
     };
-
-    gpio1: gpio1@2000000 {
-        compatible = "motorola,mc68681_gpio";
-        reg = <0x02000000 0x10>;
-    	gpio-controller;
-		#gpio-cells = <2>;
-		gpio-bank-name="i";
-		ngpios = <6>;
-		status = "okay";
-	};
 };
