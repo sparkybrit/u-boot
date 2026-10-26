@@ -12,10 +12,11 @@ CONFIG_SYS_LOAD_ADDR=0x00400000
 CONFIG_TARGET_SPARKY1=y
 CONFIG_SYS_MONITOR_BASE=0x01000400
 CONFIG_BOOTDELAY=5
-# Default kernel command line. Linux on sparky1 has no console driver yet,
-# only the early console in head.S, which "earlyprintk" turns on.
+# Default kernel command line. "earlyprintk" turns on the early console in
+# head.S; console=ttySC0,115200 then hands over to the sccnxp driver at the
+# same rate - without it Linux brings a serial console up at 9600.
 CONFIG_USE_BOOTARGS=y
-CONFIG_BOOTARGS="earlyprintk"
+CONFIG_BOOTARGS="earlyprintk console=ttySC0,115200"
 CONFIG_DISPLAY_BOARDINFO=y
 CONFIG_SYS_MALLOC_BOOTPARAMS=y
 # CONFIG_CMDLINE_EDITING is not set
