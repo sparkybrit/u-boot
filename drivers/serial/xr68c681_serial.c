@@ -100,11 +100,19 @@ static int xr68c681_serial_init_common(xr68c681_t *uart, int port_idx, int baudr
 	writeb(0, &uart->uimr);
 	writeb(UART_UACR_CLK, &uart->uacr);
 
-	/* MR1: 8 data bits, no parity; MR2: 1 stop bit */
-	writeb(UART_UMR_BC_8 | UART_UMR_PM_NONE, &uart->umr);
+	/*
+	 * MR1: 8 data bits, no parity, receiver-controlled RTS; MR2: 1 stop
+	 * bit. With RxRTS the chip negates RTSA (OP0) by itself when the
+	 * receive FIFO is full, so the host stops sending instead of
+	 * overrunning it; it never re-asserts RTSA, getc() does.
+	 */
+	writeb(UART_UMR_BC_8 | UART_UMR_PM_NONE | UART_UMR_RXRTS, &uart->umr);
 	writeb(UART_UMR_SB_STOP_BITS_1, &uart->umr);
 
 	xr68c681_serial_setbrg_common(uart, baudrate);
+
+	/* Assert RTSA: setting OPR bit 0 drives OP0 low */
+	writeb(0x01, &uart->uops);
 
 	return 0;
 }
@@ -140,11 +148,18 @@ static int xr68c681_serial_getc(struct udevice *dev)
 	struct mc68681_plat *plat = dev_get_plat(dev);
 	xr68c681_t *uart = (xr68c681_t *)(plat->base);
 
+	int ch;
+
 	/* Wait for a character to arrive. */
 	if (!(readb(&uart->usr) & UART_USR_RXRDY))
 		return -EAGAIN;
 
-	return readb(&uart->urb);
+	ch = readb(&uart->urb);
+
+	/* Room in the FIFO again: re-assert RTSA, which the chip may have negated */
+	writeb(0x01, &uart->uops);
+
+	return ch;
 }
 
 int xr68c681_serial_setbrg(struct udevice *dev, int baudrate)
