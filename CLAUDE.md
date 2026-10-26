@@ -105,13 +105,13 @@ trusting it.
 - `Kconfig`, `Makefile`, `sparky1.c` — board init, `checkboard()`, `dram_init()`
 - `configs/sparky1_defconfig` — full build configuration
 - `include/configs/sparky1.h` — legacy config header
-- `arch/m68k/dts/sparky1.dts` — device tree: XR68C681 DUART at 0x02000000 (UART, timer, GPIO)
+- `arch/m68k/dts/sparky1.dts` — device tree: XR68C681 DUART at 0x02000000 (UART, timer; the GPIO nodes were removed 2026-10-26)
 
 ### XR68C681 DUART drivers
 - `drivers/serial/xr68c681_serial.c` — serial driver (UCLASS_SERIAL)
 - `drivers/timer/xr68c681_timer.c` — 100 Hz counter/timer driver (UCLASS_TIMER); its
   remove method masks the timer interrupt before `bootm` enters an OS
-- `drivers/gpio/mc68681_gpio.c` — output port GPIO driver (UCLASS_GPIO)
+- `drivers/gpio/mc68681_gpio.c` — output port GPIO driver (UCLASS_GPIO); **not built for sparky1** since `17c0ac981e5` (it claimed OP0, now RTSA)
 - `include/xr68c681.h` — register map (`xr68c681_t`) and all bit macros for the discrete chip
 - `include/dm/platform_data/mc68681.h` — shared DM platform data struct (`mc68681_plat`)
 - Compatible strings: `exar,xr68c681` (serial), `exar,xr68c681_timer` (timer), `motorola,mc68681_gpio` (GPIO)
@@ -1318,7 +1318,7 @@ common/board_f.c:initcall_run_f()
   ├─ arch_cpu_init()                                          no-op (no mc68030 override)
   ├─ initf_dm()
   │    ├─ drivers/core/root.c:dm_init_and_scan(true)          bind pre-reloc DM devices from FDT
-  │    │    └─ binds xr68c681 serial, timer, gpio from sparky1.dts
+  │    │    └─ binds xr68c681 serial and timer from sparky1.dts
   │    └─ dm_autoprobe()
   ├─ arch/m68k/cpu/mc68030/speed.c:get_clocks()
   │    └─ gd->cpu_clk = CFG_SYS_CLK                           (16 MHz)
@@ -1647,13 +1647,22 @@ from the CF card is far faster when the card can be written elsewhere.
 the DUART's receive FIFO holds 3. `common/xyzModem.c` calls `get_timer()`,
 `schedule()` and `tstc()` twice before each `getchar()`, all through the
 console and DM layers, which probably costs more than that on a 16 MHz 68030,
-so the FIFO overruns inside the very first block. It would be proven by
-reading the overrun bit in `usr` after a failed attempt. There is no flow
-control on the console: hardware RTS would cure it with no software at all
-— `MR1[7]` (`UART_UMR_RXRTS`) makes the XR68C681 drop RTS on OP0 itself
-when the FIFO fills — but that needs OP0 wired to CTS# on the FTDI UB232R (pin 3) and not
-claimed by the GPIO driver, and nothing in the hardware project's notes says
-either way.
+so the FIFO overruns inside the very first block. Confirmed 2026-10-26: after
+a failed attempt SRA reads `0x1c`, overrun set.
+
+**Receiver RTS — a partial fix (2026-10-26).** OP0 (RTSA) is now wired to CTS#
+on the FTDI UB232R (pin 3), and `443377dcec6` sets `MR1[7]`
+(`UART_UMR_RXRTS`), asserts RTS at init and re-asserts it after every read
+(the chip only negates it). The chip side works. But **the UB232R sends two
+more characters after CTS# negates** and the receiver holds only one beyond
+the FIFO, so every stop loses one character, and `loady` at 115200 with host
+RTS/CTS fails exactly as without it (13 retries). **Keep using 57600.** With
+host RTS/CTS off nothing changed. Tests: `../sparky1-linux/tools/loady_check.py`
+(64 KB, compare, overrun bit) and `tools/cts_overshoot.py` (characters an
+adapter sends after CTS# negates). Other adapters, or a CTS# driven from
+RxRDY, are a to-do in `../sparky1-linux/CLAUDE.md` §11. OP0 belongs to the
+serial driver: the DUART GPIO bank, which claimed it, is no longer built
+(`17c0ac981e5`).
 
 **The baud handshake**, for a script: after `loady <addr> <baud>` U-Boot
 prints `Switch baudrate to <baud> bps and press ENTER ...`; switch the host
