@@ -1666,7 +1666,7 @@ once (`Timeout on pathname`) because the file descriptor is non-blocking:
 clear `O_NONBLOCK` with `fcntl` before handing it over. And stop reading the
 console as soon as the `Ready` line arrives, or the reader eats the receiver's
 `C` start characters. A working script is
-`../sparky1/tests/tools/loady_test.py`.
+`board/sparky/sparky1/loady_test.py`.
 
 ## Testing
 
