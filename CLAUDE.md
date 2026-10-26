@@ -1651,7 +1651,7 @@ so the FIFO overruns inside the very first block. It would be proven by
 reading the overrun bit in `usr` after a failed attempt. There is no flow
 control on the console: hardware RTS would cure it with no software at all
 — `MR1[7]` (`UART_UMR_RXRTS`) makes the XR68C681 drop RTS on OP0 itself
-when the FIFO fills — but that needs OP0 wired to the TTL-232R's CTS and not
+when the FIFO fills — but that needs OP0 wired to CTS# on the FTDI UB232R (pin 3) and not
 claimed by the GPIO driver, and nothing in the hardware project's notes says
 either way.
 
