@@ -12,11 +12,16 @@ CONFIG_SYS_LOAD_ADDR=0x00400000
 CONFIG_TARGET_SPARKY1=y
 CONFIG_SYS_MONITOR_BASE=0x01000400
 CONFIG_BOOTDELAY=5
+# Autoboot: Linux from /uImage on the CF's first partition (FAT32,
+# "SPARKYBOOT"), root filesystem on the second (ext4).  With no uImage there
+# fatload fails and U-Boot stays at its prompt.
+CONFIG_USE_BOOTCOMMAND=y
+CONFIG_BOOTCOMMAND="fatload ide 0:1 ${loadaddr} uImage && bootm ${loadaddr}"
 # Default kernel command line. "earlyprintk" turns on the early console in
 # head.S; console=ttySC0,115200 then hands over to the sccnxp driver at the
 # same rate - without it Linux brings a serial console up at 9600.
 CONFIG_USE_BOOTARGS=y
-CONFIG_BOOTARGS="earlyprintk console=ttySC0,115200"
+CONFIG_BOOTARGS="earlyprintk console=ttySC0,115200 root=/dev/sda2 rootfstype=ext4 rootwait rw"
 CONFIG_DISPLAY_BOARDINFO=y
 CONFIG_SYS_MALLOC_BOOTPARAMS=y
 # CONFIG_CMDLINE_EDITING is not set
@@ -74,3 +79,5 @@ CONFIG_DOS_PARTITION=y
 CONFIG_CMD_PART=y
 CONFIG_CMD_FAT=y
 CONFIG_CMD_FS_GENERIC=y
+# fatwrite, to put a kernel on the first partition from the prompt
+CONFIG_FAT_WRITE=y

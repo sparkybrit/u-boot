@@ -1555,7 +1555,7 @@ exception vector table: offset 0x004 holds `0x01000400`, which is `_start`,
 and 0x008 onward hold `_exc_handler`. `CONFIG_SYS_MONITOR_BASE` =
 `0x01000400` is where U-Boot's code sits *inside* the image. The programmer
 writes from NVRAM offset 0, which is correct. The whole image must fit the
-512 KB device (currently ~246 KB, `0x3d8b7` bytes).
+512 KB device (currently ~262 KB, 267,853 bytes, since `fatwrite` in 2026-11).
 
 **The programmer must drive A24 high** to reach the NVRAM at `0x01000000` —
 nvram-programmer branch `a24-high`, uploaded to the Teensy 2026-10-11. By the
@@ -1621,6 +1621,34 @@ prints `Verified.` with the NVRAM untouched. A changed banner, or
   reads through the programmer went unstable — three reads of the same KB
   differing — because the card was contending for the bus. Power down, swap,
   power up.
+
+## Autoboot — Linux from the CF's FAT partition (since 2026-11-07)
+
+`sparky1_defconfig` boots Linux by itself after a 5 s countdown:
+
+| Setting | Value |
+|---------|-------|
+| `bootdelay` | 5 (`CONFIG_BOOTDELAY`; it did nothing before, as there was no `bootcmd`) |
+| `bootcmd` | `fatload ide 0:1 ${loadaddr} uImage && bootm ${loadaddr}` |
+| `bootargs` | `earlyprintk console=ttySC0,115200 root=/dev/sda2 rootfstype=ext4 rootwait rw` |
+
+- The kernel is `/uImage` on partition 1 (FAT32, label `SPARKYBOOT`), the root
+  filesystem partition 2 (ext4); the card layout is `../sparky1-linux`'s
+  sub-project 4. With no `uImage` there, `fatload` fails, `&&` skips `bootm`
+  and U-Boot stays at its prompt.
+- **`CONFIG_FAT_WRITE`** gives `fatwrite`, so a kernel goes onto the card from
+  the prompt: get the uImage into RAM (`loady`, or `ide read` from a
+  `sparky1-linux` kernel slot), then `fatwrite ide 0:1 0x400000 uImage <size>`.
+  1.5 MB writes and reads back at about 930 KB/s; check it with `crc32` after a
+  `fatload`. It costs 13 KB of image (now 267,853 bytes).
+- **First checked 2026-11-07** (`sparky1-linux/board-logs/fatboot-3.log`):
+  `bbcfroot` copied from its slot, read back with the right CRC, and after a
+  reset with nobody at the console the BusyBox shell was up 37.7 s later.
+- Anything that drives the console must now stop the countdown: a board left
+  alone after a reboot is running Linux. `sparky1-linux`'s `load_and_bootm()`
+  resets it with `nvram_reset` and sends a key at `Hit any key to stop
+  autoboot`. Resetting a running Linux leaves its ext4 journal to recover on
+  the next mount.
 
 ## Loading over the console — `loady`
 
