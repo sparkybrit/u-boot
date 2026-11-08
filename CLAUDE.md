@@ -1535,7 +1535,7 @@ The 68030 requires `-mcpu=68030` (not `-mcpu=5307` or any ColdFire flag). Verify
 
 ## Programming the board
 
-The boot store is a Dallas DS1250Y NVSRAM at `0x01000000`. It is not removed
+The boot store is a Dallas DS1250AB NVSRAM at `0x01000000`. It is not removed
 and flashed in a programmer — it stays soldered and is written **in-circuit**
 by the Teensy++ 2.0 in `../nvram-programmer/`, which requests the 68030 bus via
 `/BR`/`/BGACK`, DMA-writes the NVRAM, reads it back to verify, releases the
